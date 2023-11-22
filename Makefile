@@ -7,3 +7,11 @@ dev_env:
 	poetry install --no-root
 
 .PHONY: install-hooks dev_env
+
+build:
+	docker build . --platform linux/amd64 -t us-docker.pkg.dev/arvo-datalake/containers/mageai_root:0.9.46
+
+push:
+	docker push us-docker.pkg.dev/arvo-datalake/containers/mageai_root:0.9.46
+
+release: build push
