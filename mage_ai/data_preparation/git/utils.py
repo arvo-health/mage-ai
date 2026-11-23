@@ -1,8 +1,11 @@
 import asyncio
 import base64
+import ipaddress
 import os
+import re
+import shlex
 import subprocess
-from typing import Callable
+from typing import Callable, List, Optional
 from urllib.parse import urlparse, urlsplit, urlunsplit
 
 from mage_ai.authentication.oauth.constants import ProviderName, get_ghe_hostname
@@ -24,6 +27,8 @@ from mage_ai.settings.keys import (
     GIT_SSH_PUBLIC_KEY,
     GITLAB_HOST,
 )
+
+HOSTNAME_LABEL_PATTERN = re.compile(r'^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$')
 
 
 def get_auth_type_from_url(remote_url: str) -> AuthType:
@@ -118,11 +123,19 @@ def create_ssh_keys(
     if url:
         if not url.startswith('ssh://'):
             url = f'ssh://{url}'
-        hostname = urlparse(url).hostname
+        try:
+            hostname = urlparse(url).hostname
+        except ValueError:
+            hostname = None
 
         # Codecommit requires additional configuration for SSH connection
         config_file = os.path.join(DEFAULT_SSH_KEY_DIRECTORY, 'config')
-        if hostname and hostname.startswith('git-codecommit'):
+        if (
+            is_valid_remote_host(hostname)
+            and hostname.startswith('git-codecommit')
+            and is_safe_ssh_config_value(git_config.username)
+            and is_safe_ssh_config_value(private_key_file)
+        ):
             if not os.path.exists(config_file) or overwrite:
                 config = f'''Host {hostname}
 User {git_config.username}
@@ -134,9 +147,37 @@ IdentityFile {private_key_file}
     return private_key_file
 
 
-def run_command(command: str) -> None:
-    proc = subprocess.Popen(args=command, shell=True)
+def run_command(args: List[str]) -> None:
+    proc = subprocess.Popen(args=args)
     proc.wait()
+
+
+def is_valid_remote_host(hostname: Optional[str]) -> bool:
+    if not hostname or not isinstance(hostname, str):
+        return False
+
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        pass
+
+    name = hostname[:-1] if hostname.endswith('.') else hostname
+    if not name or len(name) > 253:
+        return False
+
+    return all(HOSTNAME_LABEL_PATTERN.match(label) for label in name.split('.'))
+
+
+def is_safe_ssh_config_value(value: Optional[str]) -> bool:
+    if value is None:
+        return True
+    return not any(c.isspace() or not c.isprintable() or c == '"' for c in str(value))
+
+
+def build_git_ssh_command(private_key_file: str) -> str:
+    # Git runs GIT_SSH_COMMAND through the shell.
+    return f'ssh -i {shlex.quote(private_key_file)}'
 
 
 def add_host_to_known_hosts(remote_repo_link: str):
@@ -144,12 +185,24 @@ def add_host_to_known_hosts(remote_repo_link: str):
     if url and not url.startswith('ssh://'):
         url = f'ssh://{url}'
 
-    hostname = urlparse(url).hostname
-    if hostname:
-        cmd = f'ssh-keyscan -t rsa {hostname} >> {DEFAULT_KNOWN_HOSTS_FILE}'
-        run_command(cmd)
-        return True
-    return False
+    try:
+        hostname = urlparse(url).hostname
+    except ValueError:
+        hostname = None
+
+    if not is_valid_remote_host(hostname):
+        return False
+
+    try:
+        with open(DEFAULT_KNOWN_HOSTS_FILE, 'a') as f:
+            subprocess.run(
+                ['ssh-keyscan', '-t', 'rsa', '--', hostname],
+                stdout=f,
+                check=False,
+            )
+    except OSError as err:
+        print(f'[WARNING] Failed to add {hostname} to known hosts: {err}')
+    return True
 
 
 def get_access_token(git_config, repo_path: str) -> str:
@@ -258,7 +311,7 @@ def execute_on_remote_branch(func: Callable, branch) -> None:
             hostname = urlparse(url).hostname
 
             private_key_file = create_ssh_keys(git_config, repo_path)
-            git_ssh_cmd = f'ssh -i {private_key_file}'
+            git_ssh_cmd = build_git_ssh_command(private_key_file)
 
             with git.custom_environment(GIT_SSH_COMMAND=git_ssh_cmd):
                 if not os.path.exists(DEFAULT_KNOWN_HOSTS_FILE):

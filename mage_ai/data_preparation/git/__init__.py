@@ -15,6 +15,7 @@ from mage_ai.data_preparation.git.utils import (
 )
 from mage_ai.data_preparation.git.utils import (
     build_authenticated_remote_url,
+    build_git_ssh_command,
     check_connection,
     check_connection_async,
     create_ssh_keys,
@@ -118,7 +119,7 @@ class Git:
             remote_repo_link = self.remote_repo_link
             if self.auth_type == AuthType.SSH:
                 private_key_file = self.__create_ssh_keys()
-                env = {'GIT_SSH_COMMAND': f'ssh -i {private_key_file}'}
+                env = {'GIT_SSH_COMMAND': build_git_ssh_command(private_key_file)}
                 if not self.__add_host_to_known_hosts():
                     raise Exception('Could not add host to known_hosts')
             if self.auth_type == AuthType.HTTPS:
@@ -227,7 +228,7 @@ class Git:
                 hostname = urlparse(url).hostname
 
                 private_key_file = self.__create_ssh_keys()
-                git_ssh_cmd = f'ssh -i {private_key_file}'
+                git_ssh_cmd = build_git_ssh_command(private_key_file)
                 with self.repo.git.custom_environment(GIT_SSH_COMMAND=git_ssh_cmd):
                     if not os.path.exists(DEFAULT_KNOWN_HOSTS_FILE):
                         self.__add_host_to_known_hosts()
@@ -404,7 +405,7 @@ class Git:
                     env = {}
                     if self.auth_type == AuthType.SSH:
                         private_key_file = self.__create_ssh_keys()
-                        env = {'GIT_SSH_COMMAND': f'ssh -i {private_key_file}'}
+                        env = {'GIT_SSH_COMMAND': build_git_ssh_command(private_key_file)}
 
                     repo.git.submodule('sync', '--', path)
 
@@ -743,7 +744,7 @@ class Git:
             env = {}
             if self.auth_type == AuthType.SSH:
                 private_key_file = self.__create_ssh_keys()
-                env = {'GIT_SSH_COMMAND': f'ssh -i {private_key_file}'}
+                env = {'GIT_SSH_COMMAND': build_git_ssh_command(private_key_file)}
             Repo.clone_from(
                 self.remote_repo_link,
                 to_path=tmp_path,
@@ -796,8 +797,7 @@ class Git:
         ):
             try:
                 if os.path.exists(requirements_file):
-                    cmd = f'pip3 install -r {requirements_file}'
-                    run_command(cmd)
+                    run_command(['pip3', 'install', '-r', requirements_file])
                 logger.info(f'Installing {requirements_file} completed successfully.')
             except Exception as err:
                 logger.warning(f'Skip installing {requirements_file} due to error: {str(err)}')
