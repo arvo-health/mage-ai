@@ -5,9 +5,11 @@ import zipfile
 import jwt
 from tornado import gen, iostream
 
-from mage_ai.api.utils import authenticate_client_and_token
+from mage_ai.api.utils import authenticate_client_and_token, has_at_least_viewer_role
 from mage_ai.data_preparation.models.pipeline import Pipeline
 from mage_ai.data_preparation.models.variable import VariableType
+from mage_ai.data_preparation.repo_manager import get_project_uuid
+from mage_ai.orchestration.constants import Entity
 from mage_ai.orchestration.db.models.oauth import Oauth2Application
 from mage_ai.orchestration.db.models.schedules import PipelineRun
 from mage_ai.server.api.base import BaseHandler
@@ -17,9 +19,6 @@ from mage_ai.settings.repo import get_repo_path
 
 class ApiDownloadHandler(BaseHandler):
     async def get(self, pipeline_uuid, block_uuid, **kwargs):
-        self.set_header('Content-Type', 'text/csv')
-        self.set_header('Content-Disposition', 'attachment; filename=' + f'{block_uuid}.csv')
-
         api_key = self.get_argument('api_key', None, True)
         token = self.get_argument('token', None, True)
         user = None
@@ -31,25 +30,41 @@ class ApiDownloadHandler(BaseHandler):
                 ).first()
                 if oauth_client:
                     oauth_token, valid = authenticate_client_and_token(oauth_client.id, token)
-                    user = oauth_token.user
-                    authenticated = valid and \
-                        oauth_token and \
-                        oauth_token.user
+                    if valid and oauth_token and oauth_token.user:
+                        user = oauth_token.user
+                        authenticated = True
             if not authenticated:
-                raise Exception('Unauthorized access to download block output.')
+                self.__deny(401, 'Unauthorized access to download block output.')
+                return
+
+            # Same rule as BlockOutputPolicy, which guards the block output API.
+            if not has_at_least_viewer_role(
+                user,
+                entity=Entity.PROJECT,
+                entity_id=get_project_uuid(),
+            ):
+                self.__deny(403, 'Unauthorized access to download block output.')
+                return
 
         repo_path = get_repo_path(user=user)
 
         pipeline = Pipeline.get(pipeline_uuid, repo_path=repo_path)
         block = pipeline.get_block(block_uuid)
+        if block is None:
+            raise Exception(f'Block {block_uuid} does not exist in pipeline {pipeline_uuid}')
+
         pipeline_run_id = self.get_argument('pipeline_run_id', None)
         execution_partition = None
         if pipeline_run_id is not None:
             pipeline_run = PipelineRun.query.get(pipeline_run_id)
+            if pipeline_run is None or pipeline_run.pipeline_uuid != pipeline.uuid:
+                self.__deny(404, f'Pipeline run {pipeline_run_id} does not exist in pipeline '
+                                 f'{pipeline_uuid}')
+                return
             execution_partition = pipeline_run.execution_partition
 
-        if block is None:
-            raise Exception(f'Block {block_uuid} does not exist in pipeline {pipeline_uuid}')
+        self.set_header('Content-Type', 'text/csv')
+        self.set_header('Content-Disposition', 'attachment; filename=' + f'{block_uuid}.csv')
 
         tables = block.get_outputs(
             execution_partition=execution_partition,
@@ -72,6 +87,11 @@ class ApiDownloadHandler(BaseHandler):
                     await self.flush()
                     # Sleep for a nanosecond so other handlers can run and avoid blocking
                     await gen.sleep(0.000000001)
+
+    def __deny(self, status_code: int, message: str):
+        self.set_status(status_code)
+        self.write(dict(error=dict(code=status_code, message=message)))
+        self.finish()
 
 
 class ApiResourceDownloadHandler(BaseHandler):
