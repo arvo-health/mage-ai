@@ -1,3 +1,4 @@
+import re
 from typing import Dict, List
 
 from mage_integrations.destinations.mysql.constants import RESERVED_WORDS
@@ -94,9 +95,21 @@ def build_create_table_command(
     return f"CREATE TABLE {full_table_name} ({', '.join(columns_and_types)})"
 
 
-def convert_column_to_type(value, column_type: str):
+NUMBER_LITERAL_PATTERN = re.compile(r'[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?')
+
+
+def escape_string_literal(value: str) -> str:
+    # Backslash is an escape character inside MySQL/Doris string literals, so it must be
+    # escaped along with the quote or a trailing backslash consumes the closing quote.
+    return value.replace('\\', '\\\\').replace("'", "''")
+
+
+def convert_column_to_type(value: str, column_type: str):
+    # value must already be escaped with escape_string_literal.
     if 'DOUBLE' in column_type:
-        return f'{value}'
+        if NUMBER_LITERAL_PATTERN.fullmatch(value):
+            return value
+        return f"'{value}'"
 
     return convert_column_to_type_orig(value, column_type)
 

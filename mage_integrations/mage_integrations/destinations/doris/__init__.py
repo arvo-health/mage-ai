@@ -3,7 +3,6 @@ from typing import Dict, List, Tuple
 from mage_integrations.connections.doris import ConnectionMethod
 from mage_integrations.connections.doris import Doris as DorisConnection
 from mage_integrations.destinations.constants import (
-    COLUMN_TYPE_OBJECT,
     INTERNAL_COLUMN_CREATED_AT,
     UNIQUE_CONFLICT_METHOD_UPDATE,
 )
@@ -13,6 +12,7 @@ from mage_integrations.destinations.mysql.utils import (
     clean_column_name,
     convert_column_to_type,
     convert_column_type,
+    escape_string_literal,
 )
 from mage_integrations.destinations.sql.base import Destination, main
 from mage_integrations.destinations.sql.utils import (
@@ -131,8 +131,7 @@ WHERE table_name = '{table_name}' AND table_schema = '{database_name}'
             columns=columns,
             records=records,
             convert_column_to_type_func=convert_column_to_type,
-            string_parse_func=lambda x, y: x.replace("'", "''").replace('\\', '\\\\')
-            if COLUMN_TYPE_OBJECT == y['type'] else x,
+            escape_string_func=escape_string_literal,
             use_lowercase=self.use_lowercase,
         )
         insert_columns = ', '.join([self.clean_column_name(col)

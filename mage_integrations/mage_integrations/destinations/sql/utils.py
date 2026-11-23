@@ -267,7 +267,14 @@ def build_insert_command(
     column_identifier: str = '',
     use_lowercase: bool = True,
     allow_reserved_words: bool = False,
+    escape_string_func: Callable = None,
 ) -> List[str]:
+    """
+    escape_string_func, when provided, receives the raw text of every value that will be
+    placed inside a quoted literal (array items, JSON-serialized values and scalars) and
+    must return text that cannot terminate the literal. Otherwise only single quotes in
+    scalar values are doubled.
+    """
     values = []
     for row in records:
         vals = []
@@ -287,6 +294,9 @@ def build_insert_command(
 
                     if convert_array_func:
                         value_final = convert_array_func(v, column_type_dict)
+                    elif escape_string_func:
+                        value_final = [escape_string_func(str(s)) for s in v]
+                        value_final = f"'{{{', '.join(value_final)}}}'"
                     else:
                         value_final = [str(s).replace("'", "''") for s in v]
                         value_final = f"'{{{', '.join(value_final)}}}'"
@@ -296,6 +306,10 @@ def build_insert_command(
                 else:
                     if type(v) is dict or type(v) is list:
                         value_final = json.dumps(v)
+                        if escape_string_func:
+                            value_final = escape_string_func(value_final)
+                    elif escape_string_func:
+                        value_final = escape_string_func(str(v))
                     else:
                         value_final = str(v).replace("'", "''")
 
