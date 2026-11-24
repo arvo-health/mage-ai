@@ -42,6 +42,12 @@ class FileResource(GenericResource):
             repo_path = repo_path[0]
         if repo_path:
             repo_path = urllib.parse.unquote(repo_path)
+            try:
+                ensure_file_is_in_project(repo_path)
+            except FileNotInProjectError:
+                error = ApiError.RESOURCE_INVALID.copy()
+                error.update(message=f'Path: {repo_path} is not in the project directory.')
+                raise ApiError(error)
 
         flatten = query.get('flatten', [None])
         if flatten:
@@ -174,6 +180,7 @@ class FileResource(GenericResource):
                     repo_path=repo_path,
                     content=content,
                     overwrite=overwrite,
+                    project_bound=True,
                 )
 
                 block_type = Block.block_type_from_path(
@@ -218,7 +225,15 @@ class FileResource(GenericResource):
     @safe_db_query
     def get_model(self, pk, **kwargs):
         file_path = add_absolute_path(urllib.parse.unquote(pk))
-        return File.from_path(file_path, get_repo_path(root_project=True))
+        file = File.from_path(file_path, get_repo_path(root_project=True))
+        try:
+            ensure_file_is_in_project(file.file_path)
+            file.bind_to_project()
+        except FileNotInProjectError:
+            error = ApiError.RESOURCE_INVALID.copy()
+            error.update(message=f'File at path: {file.file_path} is not in the project directory.')
+            raise ApiError(error)
+        return file
 
     @safe_db_query
     def delete(self, **kwargs):
@@ -257,13 +272,13 @@ class FileResource(GenericResource):
         )
         try:
             ensure_file_is_in_project(new_path)
+            self.model.rename(payload['dir_path'], payload['name'])
         except FileNotInProjectError:
             error = ApiError.RESOURCE_INVALID.copy()
             error.update(dict(
                 message=f'File cannot be moved to path: {new_path} because '
                          'it is not in the project directory.'))
             raise ApiError(error)
-        self.model.rename(payload['dir_path'], payload['name'])
 
         if block_type and cache_block_action_object:
             cache_block_action_object.update_block(block_file_absolute_path=self.model.file_path)

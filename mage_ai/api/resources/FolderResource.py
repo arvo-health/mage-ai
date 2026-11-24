@@ -1,12 +1,17 @@
+import errno
 import os
-import shutil
 import urllib.parse
 from typing import Dict
 
 from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.GenericResource import GenericResource
 from mage_ai.data_preparation.models.errors import FileNotInProjectError
-from mage_ai.data_preparation.models.file import ensure_file_is_in_project
+from mage_ai.data_preparation.models.file import (
+    ensure_file_is_in_project,
+    make_directories_in_project,
+    remove_directory_in_project,
+    rename_in_project,
+)
 from mage_ai.orchestration.db import safe_db_query
 from mage_ai.settings.repo import get_repo_path
 from mage_ai.shared.path_fixer import add_absolute_path
@@ -24,22 +29,44 @@ class FolderResource(GenericResource):
     def create(cls, payload: Dict, user, **kwargs) -> 'FolderResource':
         path = full_path(payload.get('path'), payload.get('name'))
         cls.check_folder_is_in_project(path)
-        os.makedirs(path, exist_ok=True if payload.get('overwrite', False) else False)
+        try:
+            make_directories_in_project(
+                path,
+                exist_ok=True if payload.get('overwrite', False) else False,
+            )
+        except FileNotInProjectError:
+            cls.raise_not_in_project(path)
         return cls(dict(path=path), user, **kwargs)
 
     @classmethod
     def member(cls, pk, user, **kwargs):
         path = add_absolute_path(urllib.parse.unquote(pk))
+        cls.check_folder_is_in_project(path)
         return cls(dict(path=path), user, **kwargs)
 
     def delete(self, **kwargs):
         self.check_folder_is_in_project(self.path)
-        return shutil.rmtree(self.path)
+        try:
+            return remove_directory_in_project(self.path)
+        except FileNotInProjectError:
+            self.raise_not_in_project(self.path)
 
     def update(self, payload, **kwargs):
         path = full_path(payload.get('path'), payload.get('name'))
+        self.check_folder_is_in_project(self.path)
         self.check_folder_is_in_project(path)
-        shutil.move(self.path, path)
+        if os.path.isdir(path):
+            path = os.path.join(path, os.path.basename(os.path.normpath(self.path)))
+        try:
+            rename_in_project(self.path, path)
+        except FileNotInProjectError:
+            self.raise_not_in_project(path)
+        except OSError as err:
+            if err.errno != errno.EXDEV:
+                raise
+            error = ApiError.RESOURCE_INVALID.copy()
+            error.update(message=f'Folder cannot be moved to {path} on another filesystem.')
+            raise ApiError(error)
         self.model = dict(path=path)
         return self
 
@@ -48,6 +75,10 @@ class FolderResource(GenericResource):
         try:
             ensure_file_is_in_project(path)
         except FileNotInProjectError:
-            error = ApiError.RESOURCE_INVALID.copy()
-            error.update(message=f'Folder at path: {path} is not in the project directory.')
-            raise ApiError(error)
+            cls.raise_not_in_project(path)
+
+    @classmethod
+    def raise_not_in_project(cls, path: str) -> None:
+        error = ApiError.RESOURCE_INVALID.copy()
+        error.update(message=f'Folder at path: {path} is not in the project directory.')
+        raise ApiError(error)
