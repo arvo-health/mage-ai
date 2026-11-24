@@ -2,7 +2,7 @@ import asyncio
 import base64
 import os
 import subprocess
-from typing import Callable
+from typing import Callable, List
 from urllib.parse import urlparse, urlsplit, urlunsplit
 
 from mage_ai.authentication.oauth.constants import ProviderName, get_ghe_hostname
@@ -134,8 +134,8 @@ IdentityFile {private_key_file}
     return private_key_file
 
 
-def run_command(command: str) -> None:
-    proc = subprocess.Popen(args=command, shell=True)
+def run_command(args: List[str], stdout=None) -> None:
+    proc = subprocess.Popen(args=args, stdout=stdout)
     proc.wait()
 
 
@@ -145,9 +145,9 @@ def add_host_to_known_hosts(remote_repo_link: str):
         url = f'ssh://{url}'
 
     hostname = urlparse(url).hostname
-    if hostname:
-        cmd = f'ssh-keyscan -t rsa {hostname} >> {DEFAULT_KNOWN_HOSTS_FILE}'
-        run_command(cmd)
+    if hostname and not hostname.startswith('-'):
+        with open(DEFAULT_KNOWN_HOSTS_FILE, 'a') as known_hosts:
+            run_command(['ssh-keyscan', '-t', 'rsa', '--', hostname], stdout=known_hosts)
         return True
     return False
 
@@ -215,7 +215,7 @@ def check_connection(git, remote_url: str) -> None:
 
 
 async def check_connection_async(git, remote_name: str) -> None:
-    proc = git.ls_remote(remote_name, 'HEAD', as_process=True)
+    proc = git.ls_remote('--', remote_name, 'HEAD', as_process=True)
 
     await poll_process_with_timeout(
         proc,
@@ -228,7 +228,7 @@ async def check_connection_async(git, remote_name: str) -> None:
 
 
 async def validate_authentication_for_remote_url(git, remote_url: str) -> None:
-    proc = git.ls_remote(remote_url, 'HEAD', as_process=True)
+    proc = git.ls_remote('--', remote_url, 'HEAD', as_process=True)
 
     await poll_process_with_timeout(
         proc,

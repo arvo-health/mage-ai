@@ -796,8 +796,7 @@ class Git:
         ):
             try:
                 if os.path.exists(requirements_file):
-                    cmd = f'pip3 install -r {requirements_file}'
-                    run_command(cmd)
+                    run_command(['pip3', 'install', '-r', requirements_file])
                 logger.info(f'Installing {requirements_file} completed successfully.')
             except Exception as err:
                 logger.warning(f'Skip installing {requirements_file} due to error: {str(err)}')
