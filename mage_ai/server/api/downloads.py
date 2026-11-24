@@ -5,6 +5,7 @@ import zipfile
 import jwt
 from tornado import gen, iostream
 
+from mage_ai.api.session_cookie import token_from_session_cookie
 from mage_ai.api.utils import authenticate_client_and_token
 from mage_ai.data_preparation.models.pipeline import Pipeline
 from mage_ai.data_preparation.models.variable import VariableType
@@ -21,7 +22,7 @@ class ApiDownloadHandler(BaseHandler):
         self.set_header('Content-Disposition', 'attachment; filename=' + f'{block_uuid}.csv')
 
         api_key = self.get_argument('api_key', None, True)
-        token = self.get_argument('token', None, True)
+        token = self.get_argument('token', None, True) or token_from_session_cookie(self.request)
         user = None
         if REQUIRE_USER_AUTHENTICATION:
             authenticated = False

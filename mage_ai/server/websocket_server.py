@@ -18,6 +18,7 @@ from mage_ai.api.errors import ApiError
 from mage_ai.api.operations.constants import OperationType
 from mage_ai.api.resources.PipelineResource import PipelineResource
 from mage_ai.api.resources.ProjectResource import ProjectResource
+from mage_ai.api.session_cookie import token_from_session_cookie
 from mage_ai.api.utils import authenticate_client_and_token
 from mage_ai.data_preparation.models.constants import (
     CUSTOM_EXECUTION_BLOCK_TYPES,
@@ -186,7 +187,7 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
         message = json.loads(raw_message)
 
         api_key = message.get('api_key')
-        token = message.get('token')
+        token = message.get('token') or token_from_session_cookie(self.request)
 
         pipeline_uuid = message.get('pipeline_uuid')
         oauth_client, oauth_token, user = None, None, None

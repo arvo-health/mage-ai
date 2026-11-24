@@ -8,6 +8,7 @@ import simplejson
 from mage_ai.api.logging import debug, error, info
 from mage_ai.api.operations.base import BaseOperation
 from mage_ai.api.operations.constants import CREATE, DELETE, DETAIL, LIST, UPDATE
+from mage_ai.api.session_cookie import clear_session_cookie, set_session_cookie
 from mage_ai.services.tracking.metrics import increment, timing
 from mage_ai.shared.parsers import encode_complex
 
@@ -95,6 +96,14 @@ async def execute_operation(
     )
     timing('api.time', api_time, tags)
     timing('sql.time', api_time, tags)
+
+    if not child and 'sessions' == resource:
+        if CREATE == action:
+            session = response.get('session')
+            if isinstance(session, dict) and session.get('token'):
+                set_session_cookie(handler, session['token'])
+        elif UPDATE == action:
+            clear_session_cookie(handler)
 
     handler.write(
         simplejson.dumps(

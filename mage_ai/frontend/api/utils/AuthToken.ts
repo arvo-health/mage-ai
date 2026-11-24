@@ -7,7 +7,7 @@ import {
   getCurrentUserLocalStorageKey,
   removeUser,
 } from '@utils/session';
-import { getToken, removeToken, setToken } from './token';
+import { getTokenExpires, removeToken, setToken } from './token';
 import { isJsonString } from '@utils/string';
 import { redirectToUrl } from '@utils/url';
 
@@ -19,7 +19,7 @@ export type DecodedToken = {
 export default class AuthToken {
   readonly decodedToken: DecodedToken;
 
-  constructor(readonly token?: string) {
+  constructor(readonly token?: string, expires?: number | string) {
     this.decodedToken = {
       expires: 0,
       token: null,
@@ -29,7 +29,10 @@ export default class AuthToken {
       if (token) {
         this.decodedToken = jwtDecode(token);
       } else {
-        this.decodedToken = jwtDecode(getToken());
+        this.decodedToken = {
+          expires: Number(expires ?? getTokenExpires()) || 0,
+          token: null,
+        };
       }
     } catch (e) {
     }
@@ -50,7 +53,7 @@ export default class AuthToken {
   }
 
   get isValid(): boolean {
-    return this.decodedToken.token && !this.isExpired;
+    return !!this.decodedToken.expires && !this.isExpired;
   }
 
   static isLoggedIn() {

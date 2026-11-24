@@ -3,7 +3,6 @@ import Ansi from 'ansi-to-react';
 import { ThemeContext } from 'styled-components';
 import { useMutation } from 'react-query';
 
-import AuthToken from '@api/utils/AuthToken';
 import SanitizedHTML from '@components/shared/SanitizedHTML';
 import BlockType, {
   BLOCK_TYPES_NO_DATA_TABLE,
@@ -256,14 +255,13 @@ function CodeOutput(
   const [progress, setProgress] = useState<number>();
   const [blockOutputDownloadProgress, setBlockOutputDownloadProgress] = useState<string>(null);
 
-  const token = useMemo(() => new AuthToken()?.decodedToken?.token, []);
   const [downloadBlockOutputAsCsvFile, { isLoading: isLoadingDownloadBlockOutputAsCsvFile }]: any =
     useMutation(
       () =>
         api.block_outputs.pipelines.downloads.detailAsync(
           pipeline?.uuid,
           blockUUID,
-          { token },
+          {},
           {
             onDownloadProgress: p =>
               setBlockOutputDownloadProgress((Number(p?.loaded || 0) / 1000000).toFixed(3)),

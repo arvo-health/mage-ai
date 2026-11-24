@@ -4,8 +4,8 @@ from json.decoder import JSONDecodeError
 from tornado.web import RequestHandler
 
 from mage_ai.api.errors import ApiError
+from mage_ai.api.session_cookie import clear_session_cookie, token_from_session_cookie
 from mage_ai.api.utils import authenticate_client_and_token, parse_cookie_header
-from mage_ai.authentication.oauth2 import decode_token
 from mage_ai.orchestration.db.models.oauth import Oauth2Application
 from mage_ai.server.api.constants import (
     COOKIE_OAUTH_TOKEN,
@@ -76,6 +76,7 @@ class OAuthMiddleware(RequestHandler):
                 self.set_status(ApiError.INVALID_API_KEY['code'])
             else:
                 should_check = False
+                from_cookie = False
                 oauth_token = None
                 if token_from_header:
                     oauth_token, valid = authenticate_client_and_token(
@@ -84,13 +85,17 @@ class OAuthMiddleware(RequestHandler):
                     )
                     should_check = True
                 elif COOKIE_OAUTH_TOKEN in cookies:
-                    token_data = decode_token(cookies[COOKIE_OAUTH_TOKEN])
-                    if 'token' in token_data:
+                    token_from_cookie = token_from_session_cookie(self.request)
+                    if token_from_cookie:
                         oauth_token, valid = authenticate_client_and_token(
                             oauth_client.id,
-                            decode_token(cookies[COOKIE_OAUTH_TOKEN])['token'],
+                            token_from_cookie,
                         )
                     should_check = True
+                    from_cookie = True
+
+                if from_cookie and not (oauth_token and valid):
+                    clear_session_cookie(self)
 
                 if should_check:
                     if oauth_token:

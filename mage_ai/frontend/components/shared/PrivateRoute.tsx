@@ -3,7 +3,7 @@ import ServerCookie from 'next-cookies';
 import { NextPageContext } from 'next';
 
 import AuthToken from '@api/utils/AuthToken';
-import { COOKIE_KEY } from '@api/utils/token';
+import { COOKIE_KEY_EXPIRES } from '@api/utils/token';
 import { LOCAL_STORAGE_KEY_THEME } from '@oracle/styles/themes/utils';
 import { REQUIRE_USER_AUTHENTICATION, getGroup } from '@utils/session';
 import { queryString, redirectToUrl } from '@utils/url';
@@ -22,9 +22,8 @@ export default function PrivateRoute(WrappedComponent: any) {
     static async getInitialProps(ctx: NextPageContext) {
       const cookie = ServerCookie(ctx);
       const { id: currentGroupId }: { id?: string | undefined } = getGroup(ctx);
-      const token: string | undefined = cookie[COOKIE_KEY];
       const theme = cookie[LOCAL_STORAGE_KEY_THEME];
-      const auth = new AuthToken(token);
+      const auth = new AuthToken(null, cookie[COOKIE_KEY_EXPIRES]);
       const initialProps = {
         ...ctx, auth, currentGroupId, theme,
       };

@@ -39,16 +39,17 @@ def parse_raw_message(raw_message: str) -> Message:
     return filter_out_sensitive_data(message)
 
 
-def validate_message(message: Message) -> Message:
+def validate_message(message: Message, token_from_cookie: str = None) -> Message:
     if REQUIRE_USER_AUTHENTICATION or DISABLE_NOTEBOOK_EDIT_ACCESS:
         valid = not REQUIRE_USER_AUTHENTICATION
+        token = message.token or token_from_cookie
 
-        if message.api_key and message.token:
+        if message.api_key and token:
             oauth_client = Oauth2Application.query.filter(
                 Oauth2Application.client_id == message.api_key,
             ).first()
             if oauth_client:
-                _oauth_token, valid = authenticate_client_and_token(oauth_client.id, message.token)
+                _oauth_token, valid = authenticate_client_and_token(oauth_client.id, token)
 
         if not valid or DISABLE_NOTEBOOK_EDIT_ACCESS == 1:
             return Message.load(

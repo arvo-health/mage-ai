@@ -2,7 +2,6 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import Ansi from 'ansi-to-react';
 import { useMutation } from 'react-query';
 
-import AuthToken from '@api/utils/AuthToken';
 import SanitizedHTML from '@components/shared/SanitizedHTML';
 import BlockType, {
   BLOCK_TYPES_NO_DATA_TABLE,
@@ -173,7 +172,6 @@ export default function useCodeOutput({
 
   const [blockOutputDownloadProgress, setBlockOutputDownloadProgress] = useState<string>(null);
 
-  const token = new AuthToken()?.decodedToken?.token;
   const [
     downloadBlockOutputAsCsvFile,
     { isLoading: isLoadingDownloadBlockOutputAsCsvFile },
@@ -181,7 +179,7 @@ export default function useCodeOutput({
     () => api.block_outputs.pipelines.downloads.detailAsync(
       pipeline?.uuid,
       blockUUID,
-      { token },
+      {},
       {
         onDownloadProgress: (p) => setBlockOutputDownloadProgress((Number(p?.loaded || 0) / 1000000).toFixed(3)),
         responseType: ResponseTypeEnum.BLOB,
