@@ -8,7 +8,7 @@ import traceback
 import uuid
 from datetime import datetime, timedelta
 from distutils.file_util import copy_file
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import simplejson
 import tornado.websocket
@@ -18,7 +18,8 @@ from mage_ai.api.errors import ApiError
 from mage_ai.api.operations.constants import OperationType
 from mage_ai.api.resources.PipelineResource import PipelineResource
 from mage_ai.api.resources.ProjectResource import ProjectResource
-from mage_ai.api.utils import authenticate_client_and_token
+from mage_ai.api.utils import authenticate_client_and_token, has_at_least_viewer_role
+from mage_ai.authentication.oauth2 import decode_token
 from mage_ai.data_preparation.models.constants import (
     CUSTOM_EXECUTION_BLOCK_TYPES,
     PIPELINE_CONFIG_FILE,
@@ -29,7 +30,8 @@ from mage_ai.data_preparation.models.constants import (
 from mage_ai.data_preparation.models.pipeline import Pipeline
 from mage_ai.data_preparation.repo_manager import get_repo_config
 from mage_ai.data_preparation.variable_manager import get_global_variables
-from mage_ai.orchestration.db.models.oauth import Oauth2Application
+from mage_ai.orchestration.constants import Entity
+from mage_ai.orchestration.db.models.oauth import Oauth2AccessToken, Oauth2Application
 from mage_ai.server.active_kernel import (
     get_active_kernel_client,
     get_active_kernel_name,
@@ -47,16 +49,19 @@ from mage_ai.server.execution_manager import (
 from mage_ai.server.kernel_output_parser import DataType
 from mage_ai.server.kernels import DEFAULT_KERNEL_NAME, KernelName
 from mage_ai.server.logger import Logger
+from mage_ai.server.api.constants import COOKIE_OAUTH_TOKEN
 from mage_ai.server.utils.output_display import (
     add_execution_code,
     add_internal_output_info,
     get_block_output_process_code,
     get_pipeline_execution_code,
 )
+from mage_ai.server.websockets.origin import is_allowed_websocket_origin
 from mage_ai.services.spark.constants import ComputeServiceUUID
 from mage_ai.settings import (
     DISABLE_NOTEBOOK_EDIT_ACCESS,
     HIDE_ENV_VAR_VALUES,
+    OAUTH2_APPLICATION_CLIENT_ID,
     REQUIRE_USER_AUTHENTICATION,
     is_disable_pipeline_edit_access,
 )
@@ -64,6 +69,7 @@ from mage_ai.settings.platform import project_platform_activated
 from mage_ai.settings.repo import get_repo_path
 from mage_ai.shared.constants import ENV_DEV
 from mage_ai.shared.hash import merge_dict
+from mage_ai.shared.requests import get_bearer_auth_token_from_headers
 from mage_ai.shared.security import filter_out_env_var_values
 from mage_ai.utils.code import reload_all_repo_modules
 
@@ -166,15 +172,92 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
     # classmethod.
     clients = set()
     running_executions_mapping = dict()
+    # Socket that started each execution that is not tied to a pipeline, keyed by msg_id.
+    execution_clients = dict()
+
+    _oauth_token_id = None
+    _user_id = None
 
     def open(self):
+        oauth_token = self.__authenticate_handshake()
+        if oauth_token is not None:
+            self._oauth_token_id = oauth_token.id
+            self._user_id = oauth_token.user_id
         WebSocketServer.clients.add(self)
 
     def on_close(self):
-        WebSocketServer.clients.remove(self)
+        WebSocketServer.clients.discard(self)
+        for msg_id, client in list(WebSocketServer.execution_clients.items()):
+            if client is self:
+                WebSocketServer.execution_clients.pop(msg_id, None)
 
     def check_origin(self, origin):
-        return True
+        return is_allowed_websocket_origin(self, origin)
+
+    def __authenticate_handshake(self) -> Optional[Oauth2AccessToken]:
+        api_key = self.get_query_argument('api_key', None) or OAUTH2_APPLICATION_CLIENT_ID
+        token = self.get_query_argument('token', None) or \
+            get_bearer_auth_token_from_headers(self.request.headers)
+        if not token:
+            encoded_token = self.get_cookie(COOKIE_OAUTH_TOKEN)
+            if encoded_token:
+                try:
+                    token = decode_token(encoded_token).get('token')
+                except Exception:
+                    token = None
+
+        if not api_key or not token:
+            return None
+
+        oauth_client = Oauth2Application.query.filter(
+            Oauth2Application.client_id == api_key,
+        ).first()
+        if not oauth_client:
+            return None
+
+        oauth_token, valid = authenticate_client_and_token(oauth_client.id, token)
+        return oauth_token if valid else None
+
+    def _current_oauth_token(self) -> Optional[Oauth2AccessToken]:
+        """
+        Reload the access token bound to this socket during the handshake, so that a token
+        that has since expired, been deleted, or been reassigned is no longer honored.
+        """
+        if self._oauth_token_id is None:
+            return None
+        try:
+            oauth_token = Oauth2AccessToken.query.get(self._oauth_token_id)
+            if (
+                oauth_token is None
+                or oauth_token.user_id != self._user_id
+                or not oauth_token.is_valid()
+            ):
+                return None
+            return oauth_token
+        except Exception as err:
+            logger.warning(f'WebSocketServer: failed to load access token: {err}')
+            return None
+
+    def _is_authenticated(self) -> bool:
+        if not REQUIRE_USER_AUTHENTICATION:
+            return True
+        return self._current_oauth_token() is not None
+
+    def _can_view_pipeline(self, pipeline_uuid: str) -> bool:
+        if not REQUIRE_USER_AUTHENTICATION:
+            return True
+        oauth_token = self._current_oauth_token()
+        if oauth_token is None:
+            return False
+        try:
+            return bool(has_at_least_viewer_role(
+                oauth_token.user,
+                Entity.PIPELINE,
+                pipeline_uuid,
+            ))
+        except Exception as err:
+            logger.warning(f'WebSocketServer: failed to check pipeline access: {err}')
+            return False
 
     def init_kernel_client(self, kernel_name) -> KernelClient:
         if kernel_name != get_active_kernel_name():
@@ -184,21 +267,14 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
 
     async def on_message(self, raw_message):
         message = json.loads(raw_message)
-
-        api_key = message.get('api_key')
-        token = message.get('token')
+        if not isinstance(message, dict):
+            return
 
         pipeline_uuid = message.get('pipeline_uuid')
-        oauth_client, oauth_token, user = None, None, None
-
-        if api_key and token:
-            oauth_client = Oauth2Application.query.filter(
-                Oauth2Application.client_id == api_key,
-            ).first()
-            if oauth_client:
-                oauth_token, _ = authenticate_client_and_token(oauth_client.id, token)
-                if oauth_token:
-                    user = oauth_token.user
+        # Act as the user authenticated during the handshake; credentials repeated in the
+        # message body are not trusted.
+        oauth_token = self._current_oauth_token()
+        user = oauth_token.user if oauth_token else None
 
         repo_path = get_repo_path(user=user)
         pipeline = None
@@ -213,30 +289,28 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
         if REQUIRE_USER_AUTHENTICATION or DISABLE_NOTEBOOK_EDIT_ACCESS:
             valid = not REQUIRE_USER_AUTHENTICATION
 
-            if oauth_client:
-                valid = (oauth_token is not None) and oauth_token.is_valid()
-                if valid and oauth_token and user:
-                    try:
-                        if pipeline_uuid:
-                            await PipelineResource.policy_class()(
-                                PipelineResource(
-                                    pipeline,
-                                    user,
-                                ),
+            if user:
+                try:
+                    if pipeline_uuid:
+                        await PipelineResource.policy_class()(
+                            PipelineResource(
+                                pipeline,
                                 user,
-                            ).authorize_action(action=OperationType.UPDATE)
-                        else:
-                            await ProjectResource.policy_class()(
-                                ProjectResource(
-                                    {},
-                                    user,
-                                ),
+                            ),
+                            user,
+                        ).authorize_action(action=OperationType.UPDATE)
+                    else:
+                        await ProjectResource.policy_class()(
+                            ProjectResource(
+                                {},
                                 user,
-                            ).authorize_action(action=OperationType.UPDATE)
-                        valid = True
-                    except ApiError as err:
-                        print(f'[WARNING] WebSocketServer.on_message: {err}.')
-                        valid = False
+                            ),
+                            user,
+                        ).authorize_action(action=OperationType.UPDATE)
+                    valid = True
+                except ApiError as err:
+                    print(f'[WARNING] WebSocketServer.on_message: {err}.')
+                    valid = False
 
             if not valid or DISABLE_NOTEBOOK_EDIT_ACCESS == 1:
                 return self.send_message(
@@ -247,11 +321,15 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
                         msg_id=str(uuid.uuid4()),
                         type=DataType.TEXT_PLAIN,
                     ),
+                    recipient=self,
                 )
 
         output = message.get('output')
         if output:
-            self.send_message(output)
+            # Relayed output may only be published for the pipeline the sender was
+            # authorized against above.
+            if pipeline is not None and isinstance(output, dict):
+                self.send_message(output, required_pipeline_uuid=pipeline.uuid)
             return
         global_vars = message.get('global_vars')
         cancel_pipeline = message.get('cancel_pipeline')
@@ -295,6 +373,7 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
             msg_id = client.execute(code)
             value = dict(block_uuid=message.get('uuid'))
             WebSocketServer.running_executions_mapping[msg_id] = value
+            WebSocketServer.execution_clients[msg_id] = self
         elif execute_pipeline:
             self.__execute_pipeline(
                 pipeline,
@@ -310,7 +389,17 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
             )
 
     @classmethod
-    def send_message(cls, message: dict) -> None:
+    def send_message(
+        cls,
+        message: dict,
+        recipient: 'WebSocketServer' = None,
+        required_pipeline_uuid: str = None,
+    ) -> None:
+        """
+        Publish a kernel or execution message. A message for a pipeline is delivered only to
+        sockets whose user can view that pipeline. A message that is not tied to a pipeline is
+        delivered only to the socket that started the execution, or to `recipient`.
+        """
         def should_filter_message(message):
             if (
                 message.get('data') is None
@@ -363,10 +452,15 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
             if execution_metadata is not None
             else WebSocketServer.running_executions_mapping.get(msg_id, dict())
         )
+        if not isinstance(msg_id_value, dict):
+            return
         block_type = msg_id_value.get('block_type')
         block_uuid = msg_id_value.get('block_uuid')
         replicated_block = msg_id_value.get('replicated_block')
         pipeline_uuid = msg_id_value.get('pipeline_uuid')
+
+        if required_pipeline_uuid is not None and pipeline_uuid != required_pipeline_uuid:
+            return
 
         error = message.get('error')
         if error:
@@ -390,13 +484,32 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
         # it will trigger this send_message from the WebSocket subscriber.
         # This log message is unnecessary and publishing to clients is also unnecessary.
         if block_uuid or pipeline_uuid:
+            if recipient is not None:
+                candidates = [recipient]
+            elif pipeline_uuid:
+                candidates = list(cls.clients)
+            else:
+                candidates = [cls.execution_clients.get(msg_id)]
+
+            recipients = []
+            for client in candidates:
+                if client is None or client not in cls.clients:
+                    continue
+                if pipeline_uuid:
+                    allowed = client._can_view_pipeline(pipeline_uuid)
+                else:
+                    allowed = recipient is not None or client._is_authenticated()
+                if allowed:
+                    recipients.append(client)
+
             logger.info(
                 f'[{block_uuid}] Sending message for {msg_id} to '
-                f'{len(cls.clients)} client(s):\n{json.dumps(message_final, indent=2)}'
+                f'{len(recipients)} client(s):\n{json.dumps(message_final, indent=2)}'
             )
 
-            for client in cls.clients:
-                client.write_message(json.dumps(message_final))
+            payload = json.dumps(message_final)
+            for client in recipients:
+                client.write_message(payload)
 
     async def __execute_block(
         self,
@@ -443,6 +556,7 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
         value = dict(
             block_type=block_type or block.type,
             block_uuid=block_uuid,
+            pipeline_uuid=pipeline_uuid,
             replicated_block=block.replicated_block,
         )
 
