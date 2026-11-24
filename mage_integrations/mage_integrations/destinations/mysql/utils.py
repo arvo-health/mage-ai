@@ -1,3 +1,4 @@
+import re
 from typing import Dict, List
 
 from mage_integrations.destinations.mysql.constants import RESERVED_WORDS
@@ -17,6 +18,8 @@ from mage_integrations.sources.constants import (
     COLUMN_TYPE_OBJECT,
     COLUMN_TYPE_STRING,
 )
+
+NUMBER_LITERAL_PATTERN = re.compile(r'[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?')
 
 
 def clean_column_name(col, lower_case: bool = True):
@@ -94,11 +97,34 @@ def build_create_table_command(
     return f"CREATE TABLE {full_table_name} ({', '.join(columns_and_types)})"
 
 
+def escape_string_literal(value: str) -> str:
+    # Callers have already doubled single quotes. MySQL also treats a backslash
+    # as an escape character inside a quoted string, so it must be escaped too.
+    return str(value).replace('\\', '\\\\')
+
+
+def convert_number_literal(value) -> str:
+    value_str = str(value).strip()
+    if value_str.lower() == 'true':
+        return '1'
+    elif value_str.lower() == 'false':
+        return '0'
+    elif NUMBER_LITERAL_PATTERN.fullmatch(value_str):
+        return value_str
+
+    raise ValueError(f'Value {value_str[:100]!r} is not a valid number.')
+
+
+def convert_array(value, column_type_dict: Dict) -> str:
+    items = [escape_string_literal(str(item).replace("'", "''")) for item in value]
+    return f"'{{{', '.join(items)}}}'"
+
+
 def convert_column_to_type(value, column_type: str):
     if 'DOUBLE' in column_type:
-        return f'{value}'
+        return convert_number_literal(value)
 
-    return convert_column_to_type_orig(value, column_type)
+    return convert_column_to_type_orig(escape_string_literal(value), column_type)
 
 
 def convert_column_type(column_type: str, column_settings: Dict, **kwargs) -> str:
