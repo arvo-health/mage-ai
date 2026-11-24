@@ -9,14 +9,14 @@ def get_dbt_target_path():
     return os.path.join(get_repo_path(), 'dbt', 'target')
 
 
-def run_docs_server():
+def run_docs_server(host: str = 'localhost'):
     target_path = get_dbt_target_path()
     if not os.path.exists(target_path):
         os.makedirs(target_path)
 
     os.chdir(target_path)
 
-    httpd = socketserver.TCPServer(('', 7789), SimpleHTTPRequestHandler)
+    httpd = socketserver.TCPServer((host or 'localhost', 7789), SimpleHTTPRequestHandler)
 
     try:
         print('Starting DBT docs server...')

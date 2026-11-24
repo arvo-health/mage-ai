@@ -11,7 +11,11 @@ from typer.core import TyperGroup
 from mage_ai.cli.utils import parse_runtime_variables
 from mage_ai.data_preparation.repo_manager import ProjectType
 from mage_ai.services.newrelic import initialize_new_relic
-from mage_ai.shared.constants import ENV_VAR_INSTANCE_TYPE, InstanceType
+from mage_ai.shared.constants import (
+    ENV_VAR_INSTANCE_TYPE,
+    ENV_VAR_SERVER_HOST,
+    InstanceType,
+)
 
 
 class OrderCommands(TyperGroup):
@@ -44,7 +48,11 @@ INIT_PROJECT_UUID_DEFAULT = typer.Option(
 START_PROJECT_PATH_DEFAULT = typer.Argument(
     os.getcwd(), help='path of the Mage project to be loaded.'
 )
-START_HOST_DEFAULT = typer.Option('localhost', help='specify the host.')
+START_HOST_DEFAULT = typer.Option(
+    'localhost',
+    envvar=ENV_VAR_SERVER_HOST,
+    help='specify the host to bind to; use 0.0.0.0 to listen on all interfaces.',
+)
 START_PORT_DEFAULT = typer.Option('6789', help='specify the port.')
 START_MANAGE_INSTANCE_DEFAULT = typer.Option('0', help='')
 START_DBT_DOCS_INSTANCE_DEFAULT = typer.Option('0', help='')

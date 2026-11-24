@@ -20,6 +20,7 @@ S3_PREFIX = 's3://'
 GCS_PREFIX = 'gs://'
 
 ENV_VAR_INSTANCE_TYPE = 'INSTANCE_TYPE'
+ENV_VAR_SERVER_HOST = 'MAGE_SERVER_HOST'
 
 
 class InstanceType(StrEnum):
