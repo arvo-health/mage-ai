@@ -118,6 +118,7 @@ class ServerTests(AsyncDBTestCase):
         self.assertTrue(len(os.listdir(os.path.join(test_dir, 'test'))) > 0)
         shutil.rmtree(test_dir)
 
+    @patch('mage_ai.server.server.DEFAULT_OWNER_PASSWORD', 'placeholder-owner-password')
     def test_initialize_user_authentication_standalone_project(self):
         initialize_user_authentication(ProjectType.STANDALONE)
 
@@ -160,6 +161,7 @@ class ServerTests(AsyncDBTestCase):
         owner_user = User.query.filter(User.email == 'admin@admin.com').one_or_none()
         self.assertIsNotNone(owner_user)
 
+    @patch('mage_ai.server.server.DEFAULT_OWNER_PASSWORD', 'placeholder-owner-password')
     def test_initialize_user_authentication_subproject(self):
         initialize_user_authentication(ProjectType.SUB)
 

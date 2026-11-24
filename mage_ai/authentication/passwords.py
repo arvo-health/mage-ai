@@ -1,5 +1,7 @@
 import bcrypt
 
+MIN_PASSWORD_LENGTH = 8
+
 
 def generate_salt() -> str:
     return bcrypt.gensalt(14)

@@ -20,7 +20,11 @@ from tornado.log import enable_pretty_logging
 from tornado.options import options
 from watchdog.observers import Observer
 
-from mage_ai.authentication.passwords import create_bcrypt_hash, generate_salt
+from mage_ai.authentication.passwords import (
+    MIN_PASSWORD_LENGTH,
+    create_bcrypt_hash,
+    generate_salt,
+)
 from mage_ai.cache.block import BlockCache
 from mage_ai.cache.block_action_object import BlockActionObjectCache
 from mage_ai.cache.dbt.cache import DBTCache
@@ -486,6 +490,10 @@ def make_app(
     )
 
 
+class OwnerPasswordRequiredError(Exception):
+    pass
+
+
 @safe_db_query
 def initialize_user_authentication(project_type: ProjectType) -> Oauth2Application:
     logger.info('User authentication is enabled.')
@@ -522,7 +530,6 @@ def initialize_user_authentication(project_type: ProjectType) -> Oauth2Applicati
                     username=get_settings_value(LDAP_ADMIN_USERNAME, 'admin'),
                 )
         else:
-            password_salt = generate_salt()
             user = User.query.filter(
                 or_(
                     User.email == DEFAULT_OWNER_EMAIL,
@@ -530,9 +537,19 @@ def initialize_user_authentication(project_type: ProjectType) -> Oauth2Applicati
                 ),
             ).first()
             if not user:
+                owner_password = DEFAULT_OWNER_PASSWORD
+                if not owner_password or len(owner_password) < MIN_PASSWORD_LENGTH:
+                    raise OwnerPasswordRequiredError(
+                        'No owner user exists and DEFAULT_OWNER_PASSWORD is not set to a '
+                        f'password of at least {MIN_PASSWORD_LENGTH} characters. Set '
+                        'DEFAULT_OWNER_PASSWORD to a unique password (and optionally '
+                        'DEFAULT_OWNER_EMAIL and DEFAULT_OWNER_USERNAME) before starting '
+                        'Mage with user authentication enabled.'
+                    )
+                password_salt = generate_salt()
                 user = User.create(
                     email=DEFAULT_OWNER_EMAIL,
-                    password_hash=create_bcrypt_hash(DEFAULT_OWNER_PASSWORD, password_salt),
+                    password_hash=create_bcrypt_hash(owner_password, password_salt),
                     password_salt=password_salt,
                     roles_new=[default_owner_role],
                     username=DEFAULT_OWNER_USERNAME,
@@ -823,15 +840,20 @@ def start_server(
                 traceback.print_exc()
 
         # Start web server
-        asyncio.run(
-            main(
-                host=host,
-                port=port,
-                project=project,
-                project_type=project_type,
-                status_only=run_web_server_with_status_only,
+        try:
+            asyncio.run(
+                main(
+                    host=host,
+                    port=port,
+                    project=project,
+                    project_type=project_type,
+                    status_only=run_web_server_with_status_only,
+                )
             )
-        )
+        except OwnerPasswordRequiredError as err:
+            logger.error(str(err))
+            scheduler_manager.stop_scheduler()
+            raise SystemExit(1)
 
 
 if __name__ == '__main__':
