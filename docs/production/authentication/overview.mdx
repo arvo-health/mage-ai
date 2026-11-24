@@ -86,12 +86,13 @@ permissions (e.g. all permissions).
 
 The owner user can create, edit, and delete other users.
 
-Here are the default credentials for the owner user to sign in with:
+The owner user signs in with the email `admin@admin.com` (or the username `admin`). Its password
+is not fixed: unless `DEFAULT_OWNER_PASSWORD` is set, Mage generates a random password when it
+creates the owner user and prints it once in the server output. Sign in with it and change it.
 
-| Field | Value |
-| --- | --- |
-| Email | `admin@admin.com` |
-| Password | `admin` |
+If an existing owner user still has the password that older versions of Mage assigned by default,
+Mage replaces that password on startup, revokes the user's access tokens, and prints the new
+password in the server output.
 
 <Note>
     Available in versions >= `0.9.72`

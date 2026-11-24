@@ -193,14 +193,11 @@ If you're familiar with [Docker Compose](https://docs.docker.com/compose/) or pl
 Starting with **Mage OSS v0.9.78 and above**, and in **Mage Pro**,
 **user authentication is enabled by default**.
 
-When you first start Mage, the default login credentials are:
+When you first start Mage, it creates an owner user with the email `admin@admin.com` and a random
+password, which it prints once in the server output. To choose the password yourself, set the
+`DEFAULT_OWNER_PASSWORD` environment variable before the first start.
 
-| Field     | Value        |
-|-----------|--------------|
-| Email  | `admin@admin.com`      |
-| Password  | `admin`      |
-
-⚠️ **Important:** After logging in for the first time, we strongly recommend changing the default password or creating new user accounts for your team. See [User authentication](/production/authentication/overview) for more details.
+⚠️ **Important:** After logging in for the first time, we strongly recommend changing the generated password or creating new user accounts for your team. See [User authentication](/production/authentication/overview) for more details.
 
 
 ## 🏃‍♂️ Run your first pipeline
