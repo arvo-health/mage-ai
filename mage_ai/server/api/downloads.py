@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 import zipfile
 
@@ -6,6 +7,8 @@ import jwt
 from tornado import gen, iostream
 
 from mage_ai.api.utils import authenticate_client_and_token
+from mage_ai.data_preparation.models.errors import FileNotInProjectError
+from mage_ai.data_preparation.models.file import open_in_project
 from mage_ai.data_preparation.models.pipeline import Pipeline
 from mage_ai.data_preparation.models.variable import VariableType
 from mage_ai.orchestration.db.models.oauth import Oauth2Application
@@ -84,10 +87,11 @@ class ApiResourceDownloadHandler(BaseHandler):
             file_list = decoded_payload['file_list']
             self.ignore_folder_structure = decoded_payload['ignore_folder_structure']
 
-            self.abs_repo_path = os.path.abspath(get_repo_path())
+            self.abs_repo_path = os.path.realpath(get_repo_path())
 
             relative_file_list = list(map(self.relative_path_mapping, file_list))
 
+            file_pointer = None
             try:
                 file_pointer = self.get_file_pointer(file_list, relative_file_list)
 
@@ -100,7 +104,8 @@ class ApiResourceDownloadHandler(BaseHandler):
                 self.set_status(400)
                 self.write(f'Error fetching file {file_name}.\n{e}')
             finally:
-                file_pointer.close()
+                if file_pointer is not None:
+                    file_pointer.close()
 
             self.set_header('Content-Type', 'application/force-download')
             self.set_header('Content-Disposition', f'attachment; filename={file_name}')
@@ -119,22 +124,29 @@ class ApiResourceDownloadHandler(BaseHandler):
     def get_file_pointer(self, file_list, relative_file_list):
         if len(file_list) == 1:
             if file_list[0].endswith('.xlsx'):  # Check if it's an XLSX file
-                return open(file_list[0], 'rb')  # Open in binary mode for XLSX
+                return open(self.open_file(file_list[0]), 'rb')  # Open in binary mode for XLSX
             else:
-                return open(file_list[0])
+                return open(self.open_file(file_list[0]))
         return self.zip_files(file_list, relative_file_list)
+
+    def open_file(self, path: str) -> int:
+        try:
+            return open_in_project(path, os.O_RDONLY, root=self.abs_repo_path)
+        except FileNotInProjectError:
+            raise ValueError(path)
 
     # creates a temporary zip and returns the (open) file pointer
     def zip_files(self, file_list, relative_file_list):
         zip_file = tempfile.NamedTemporaryFile(suffix='.zip', mode='w+b')
         with zipfile.ZipFile(zip_file, 'w') as zipf:
             for path, relative in zip(file_list, relative_file_list):
-                zipf.write(path, relative)
+                with open(self.open_file(path), 'rb') as source, zipf.open(relative, 'w') as target:
+                    shutil.copyfileobj(source, target)
         zip_file.seek(0)  # set cursor to start of file to prepare for content extraction
         return zip_file
 
     def relative_path_mapping(self, path):
-        abs_path = os.path.abspath(path)
+        abs_path = os.path.realpath(path)
         common_ground = os.path.commonpath([self.abs_repo_path, abs_path])
 
         # trying to access files outside of the project folder
