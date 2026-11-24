@@ -124,7 +124,11 @@ class EcsTaskManager:
             name: dict()
         }
 
-        return run_task(f'mage start {name}', ecs_config=ecs_config, wait_for_completion=False)
+        return run_task(
+            f'mage start {name} --host 0.0.0.0',
+            ecs_config=ecs_config,
+            wait_for_completion=False,
+        )
 
     def stop_task(self, task_arn: str):
         return stop_task(task_arn, self.cluster_name)

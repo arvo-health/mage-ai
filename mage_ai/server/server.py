@@ -118,7 +118,11 @@ from mage_ai.settings.repo import (
     get_variables_dir,
     set_repo_path,
 )
-from mage_ai.shared.constants import ENV_VAR_INSTANCE_TYPE, InstanceType
+from mage_ai.shared.constants import (
+    ENV_VAR_INSTANCE_TYPE,
+    ENV_VAR_SERVER_HOST,
+    InstanceType,
+)
 from mage_ai.shared.environments import is_debug, is_dev
 from mage_ai.shared.io import chmod
 from mage_ai.shared.logger import LoggingLevel, set_logging_format
@@ -593,6 +597,7 @@ async def main(
         status_only=status_only,
     )
 
+    host = host or 'localhost'
     port = int(port)
     max_port = port + 100
     try:
@@ -605,12 +610,8 @@ async def main(
     except OSError:
         logger.error(f'Socket error while trying to find an open port. Defaulting to port {port}')
 
-    app.listen(
-        port,
-        address=host if host != 'localhost' else None,
-    )
+    app.listen(port, address=host)
 
-    host = host or 'localhost'
     url = f'http://{host}:{port}'
     if update_routes:
         url = f'{url}/{ROUTES_BASE_PATH}'
@@ -764,7 +765,7 @@ def start_server(
     cluster_type: ClusterType = None,
     project_uuid: str = None,
 ):
-    host = host if host else None
+    host = host or os.getenv(ENV_VAR_SERVER_HOST) or 'localhost'
     port = port if port else DATA_PREP_SERVER_PORT
     project = project if project else None
 
@@ -796,7 +797,7 @@ def start_server(
     enable_pretty_logging()
 
     if dbt_docs:
-        run_docs_server()
+        run_docs_server(host=host)
     else:
         set_db_schema()
         run_web_server_with_status_only = False
