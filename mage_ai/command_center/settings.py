@@ -2,7 +2,6 @@ import os
 from typing import Dict
 
 import yaml
-from jinja2 import Template
 
 from mage_ai.command_center.constants import SETTINGS_FILENAME
 from mage_ai.shared.io import safe_write
@@ -14,11 +13,9 @@ def load_settings(full_path: str = None) -> Dict:
     settings = None
 
     if os.path.exists(full_path):
+        # This file stores values submitted through the API; never render it as a template.
         with open(full_path, 'r', encoding='utf-8') as f:
-            from mage_ai.data_preparation.shared.utils import get_template_vars_no_db
-
-            content = Template(f.read()).render(**get_template_vars_no_db())
-            settings = yaml.full_load(content) or {}
+            settings = yaml.safe_load(f.read()) or {}
 
     return settings
 
