@@ -104,6 +104,14 @@ try:
 except ValueError:
     MAGE_ACCESS_TOKEN_EXPIRY_TIME = 2592000
 
+# Comma separated list of origins (e.g. https://mage.example.com) that may open a websocket
+# to this server in addition to the server's own origin.
+WEBSOCKET_ALLOWED_ORIGINS = [
+    origin.strip().rstrip('/').lower()
+    for origin in os.getenv('WEBSOCKET_ALLOWED_ORIGINS', '').split(',')
+    if origin.strip()
+]
+
 # Default access level to give to users created when authenticated through OAuth
 # for the first time. value should be the name of a Mage role (e.g. Viewer, Editor, Admin)
 OAUTH_DEFAULT_ACCESS = os.getenv('OAUTH_DEFAULT_ACCESS')

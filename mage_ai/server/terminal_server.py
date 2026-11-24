@@ -11,6 +11,7 @@ from mage_ai.data_preparation.models.file import ensure_file_is_in_project
 from mage_ai.data_preparation.repo_manager import get_project_uuid
 from mage_ai.orchestration.constants import Entity
 from mage_ai.orchestration.db.models.oauth import Oauth2Application
+from mage_ai.server.websockets.origin import is_allowed_websocket_origin
 from mage_ai.settings import (
     DISABLE_TERMINAL,
     REQUIRE_USER_AUTHENTICATION,
@@ -54,7 +55,7 @@ class TerminalWebsocketServer(terminado.TermSocket):
         return next(iter(self.term_manager.shell_command))
 
     def check_origin(self, origin):
-        return True
+        return is_allowed_websocket_origin(self, origin)
 
     def on_pty_read(self, text):
         """Data read from pty; send to frontend"""
