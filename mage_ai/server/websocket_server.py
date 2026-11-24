@@ -53,6 +53,7 @@ from mage_ai.server.utils.output_display import (
     get_block_output_process_code,
     get_pipeline_execution_code,
 )
+from mage_ai.server.websocket_auth import authenticate_websocket_request
 from mage_ai.services.spark.constants import ComputeServiceUUID
 from mage_ai.settings import (
     DISABLE_NOTEBOOK_EDIT_ACCESS,
@@ -168,10 +169,14 @@ class WebSocketServer(tornado.websocket.WebSocketHandler):
     running_executions_mapping = dict()
 
     def open(self):
+        # Every client in `clients` receives all kernel output, so only
+        # authenticated sessions may join.
+        if REQUIRE_USER_AUTHENTICATION and not authenticate_websocket_request(self.request):
+            return
         WebSocketServer.clients.add(self)
 
     def on_close(self):
-        WebSocketServer.clients.remove(self)
+        WebSocketServer.clients.discard(self)
 
     def check_origin(self, origin):
         return True
