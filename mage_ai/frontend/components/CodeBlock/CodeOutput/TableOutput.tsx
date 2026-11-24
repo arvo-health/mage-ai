@@ -1,7 +1,7 @@
-import InnerHTML from 'dangerously-set-html-content';
 import { useMemo } from 'react';
 
 import DataTable from '@components/DataTable';
+import SanitizedHTML from '@components/shared/SanitizedHTML';
 import FlexContainer from '@oracle/components/FlexContainer';
 import Spacing from '@oracle/elements/Spacing';
 import Text from '@oracle/elements/Text';
@@ -95,7 +95,7 @@ function TableOutput({
           {rows.map((row, idx) => (
             <div key={`html-row-${idx}`}>
               {row.map((cell, cellIdx) => (
-                <InnerHTML html={String(cell)} key={`html-cell-${cellIdx}`} />
+                <SanitizedHTML html={String(cell)} key={`html-cell-${cellIdx}`} />
               ))}
             </div>
           ))}

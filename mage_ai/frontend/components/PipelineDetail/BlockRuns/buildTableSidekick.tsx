@@ -4,9 +4,9 @@ import ButtonTabs, { TabType } from '@oracle/components/Tabs/ButtonTabs';
 import DataTable from '@components/DataTable';
 import DependencyGraph from '@components/DependencyGraph';
 import Divider from '@oracle/elements/Divider';
-import InnerHTML from 'dangerously-set-html-content';
 import FlexContainer from '@oracle/components/FlexContainer';
 import PipelineType from '@interfaces/PipelineType';
+import SanitizedHTML from '@components/shared/SanitizedHTML';
 import Spacing from '@oracle/elements/Spacing';
 import Spinner from '@oracle/components/Spinner';
 import { HTMLOutputStyle, OutputRowStyle } from 'components/CodeBlock/CodeOutput/index.style';
@@ -175,7 +175,7 @@ export default function ({
               // We need to force the key change or else it doesn’t update.
               <OutputRowStyle contained key={key} normalPadding>
                 <HTMLOutputStyle monospace>
-                  <InnerHTML html={textData} />
+                  <SanitizedHTML html={textData} />
                 </HTMLOutputStyle>
               </OutputRowStyle>
             );

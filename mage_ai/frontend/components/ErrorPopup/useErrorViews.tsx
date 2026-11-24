@@ -95,16 +95,14 @@ export default function useErrorViews({
             <Spacing mt={1}>
               {messages.map((msg, idx) => (
                 <Text
-                  // @ts-ignore
-                  dangerouslySetInnerHTML={{
-                    // @ts-ignore
-                    __html: msg.replaceAll(' ', '&nbsp;'),
-                  }}
                   default
                   disableWordBreak
                   key={`${msg}-${idx}`}
                   monospace
-                />
+                >
+                  {/* @ts-ignore */}
+                  {msg.replaceAll(' ', '\u00a0')}
+                </Text>
               ))}
             </Spacing>
           )}
@@ -130,17 +128,15 @@ export default function useErrorViews({
             <Spacing mt={1}>
               {errors.map((msg, idx) => (
                 <Text
-                  // @ts-ignore
-                  dangerouslySetInnerHTML={{
-                    // @ts-ignore
-                    __html: msg.replaceAll(' ', '&nbsp;'),
-                  }}
                   default
                   disableWordBreak
                   // @ts-ignore
                   key={`${msg}-${idx}`}
                   monospace
-                />
+                >
+                  {/* @ts-ignore */}
+                  {msg.replaceAll(' ', '\u00a0')}
+                </Text>
               ))}
             </Spacing>
           )}

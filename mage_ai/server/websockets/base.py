@@ -3,6 +3,7 @@ from typing import List
 import simplejson
 from tornado.websocket import WebSocketHandler
 
+from mage_ai.api.session_cookie import token_from_session_cookie
 from mage_ai.server.websockets.models import Client, Error, Message
 from mage_ai.server.websockets.utils import (
     filter_out_sensitive_data,
@@ -29,7 +30,7 @@ class BaseHandler(WebSocketHandler):
 
     def on_message(self, raw_message: str):
         message = parse_raw_message(raw_message)
-        message = validate_message(message)
+        message = validate_message(message, token_from_session_cookie(self.request))
 
         if message.error or message.executed:
             return self.send_message(message)

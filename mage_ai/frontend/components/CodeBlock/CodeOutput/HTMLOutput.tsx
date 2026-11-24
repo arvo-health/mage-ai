@@ -1,6 +1,6 @@
 import React from 'react';
-import InnerHTML from 'dangerously-set-html-content';
 
+import SanitizedHTML from '@components/shared/SanitizedHTML';
 import { OutputRowStyle, HTMLOutputStyle, OutputRowProps } from './index.style';
 
 type HTMLOutputProps = {
@@ -11,7 +11,7 @@ function HTMLOutput({ value, ...outputRowSharedProps }: HTMLOutputProps) {
   return (
     <OutputRowStyle {...outputRowSharedProps}>
       <HTMLOutputStyle monospace>
-        <InnerHTML html={value} />
+        <SanitizedHTML html={value} />
       </HTMLOutputStyle>
     </OutputRowStyle>
   );

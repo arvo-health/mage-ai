@@ -40,6 +40,7 @@ import { SheetProvider } from '@context/Sheet/SheetProvider';
 import { ThemeType } from '@oracle/styles/themes/constants';
 import { addPageHistory } from '@storage/CommandCenter/utils';
 import { getCurrentTheme } from '@oracle/styles/themes/utils';
+import { getToken, removeToken } from '@api/utils/token';
 import { gridTheme as gridThemeDefault, theme as stylesTheme } from '@styles/theme';
 import { isDemo } from '@utils/environment';
 import { queryFromUrl, queryString, redirectToUrl } from '@utils/url';
@@ -101,6 +102,14 @@ function MyApp(props: MyAppProps & AppProps) {
   useEffect(() => {
     setTimeout(() => savePageHistory(), 3000);
   }, [savePageHistory]);
+
+  useEffect(() => {
+    // A session cookie readable from page scripts was written by an older frontend; drop it so
+    // the user signs in again and receives the HttpOnly cookie from the server.
+    if (getToken()) {
+      removeToken(router?.basePath);
+    }
+  }, [router?.basePath]);
 
   useEffect(() => {
     const handleRouteChangeComplete = (url: URL) => {

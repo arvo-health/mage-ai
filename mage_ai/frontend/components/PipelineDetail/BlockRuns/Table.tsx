@@ -5,7 +5,6 @@ import Router from 'next/router';
 import { ThemeContext } from 'styled-components';
 import { useMutation } from 'react-query';
 
-import AuthToken from '@api/utils/AuthToken';
 import BlockRunType, { RunStatus } from '@interfaces/BlockRunType';
 import Button from '@oracle/elements/Button';
 import Circle from '@oracle/elements/Circle';
@@ -95,14 +94,13 @@ function BlockRunsTable({
     [q, sortColumnIndexQuery],
   );
 
-  const token = useMemo(() => new AuthToken()?.decodedToken?.token, []);
   const [downloadBlockOutputAsCsvFile, { isLoading: isLoadingDownloadBlockOutputAsCsvFile }]: any =
     useMutation(
       ({ blockUUID, pipelineRunId }: any) =>
         api.block_outputs.pipelines.downloads.detailAsync(
           pipeline?.uuid,
           blockUUID,
-          { pipeline_run_id: pipelineRunId, token },
+          { pipeline_run_id: pipelineRunId },
           {
             onDownloadProgress: p =>
               setBlockOutputDownloadProgress((Number(p?.loaded || 0) / 1000000).toFixed(3)),

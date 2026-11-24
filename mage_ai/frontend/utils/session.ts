@@ -6,7 +6,7 @@ import ls from 'local-storage';
 import GroupType from '@interfaces/GroupType';
 import GroupMembershipType from '@interfaces/GroupMembershipType';
 import UserType, { RoleValueEnum, UserAccessEnum } from '@interfaces/UserType';
-import { COOKIE_KEY, SHARED_OPTS } from '@api/utils/token';
+import { COOKIE_KEY_EXPIRES, SHARED_OPTS } from '@api/utils/token';
 import { SHARED_COOKIE_PROPERTIES } from '@utils/cookies/constants';
 import { resetObjectCounts } from '@storage/localStorage';
 
@@ -137,8 +137,8 @@ export function removeGroupMembership() {
 
 export const isLoggedIn = (ctx: NextPageContext) => {
   const cookie = ServerCookie(ctx);
-  const token: string | undefined = cookie[COOKIE_KEY];
-  return !!token;
+  const expires: string | undefined = cookie[COOKIE_KEY_EXPIRES];
+  return !!expires;
 };
 
 export function isViewer(basePath?: string): boolean {

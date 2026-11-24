@@ -5,6 +5,7 @@ import re
 import terminado
 from tornado import gen
 
+from mage_ai.api.session_cookie import token_from_session_cookie
 from mage_ai.api.utils import authenticate_client_and_token, has_at_least_editor_role
 from mage_ai.data_preparation.models.errors import FileNotInProjectError
 from mage_ai.data_preparation.models.file import ensure_file_is_in_project
@@ -99,7 +100,7 @@ class TerminalWebsocketServer(terminado.TermSocket):
         message = json.loads(raw_message)
 
         api_key = message.get('api_key')
-        token = message.get('token')
+        token = message.get('token') or token_from_session_cookie(self.request)
         # This is a list of strings
         command = message.get('command')
 

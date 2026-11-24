@@ -1,9 +1,8 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import Ansi from 'ansi-to-react';
-import InnerHTML from 'dangerously-set-html-content';
 import { useMutation } from 'react-query';
 
-import AuthToken from '@api/utils/AuthToken';
+import SanitizedHTML from '@components/shared/SanitizedHTML';
 import BlockType, {
   BLOCK_TYPES_NO_DATA_TABLE,
   BlockTypeEnum,
@@ -173,7 +172,6 @@ export default function useCodeOutput({
 
   const [blockOutputDownloadProgress, setBlockOutputDownloadProgress] = useState<string>(null);
 
-  const token = new AuthToken()?.decodedToken?.token;
   const [
     downloadBlockOutputAsCsvFile,
     { isLoading: isLoadingDownloadBlockOutputAsCsvFile },
@@ -181,7 +179,7 @@ export default function useCodeOutput({
     () => api.block_outputs.pipelines.downloads.detailAsync(
       pipeline?.uuid,
       blockUUID,
-      { token },
+      {},
       {
         onDownloadProgress: (p) => setBlockOutputDownloadProgress((Number(p?.loaded || 0) / 1000000).toFixed(3)),
         responseType: ResponseTypeEnum.BLOB,
@@ -433,7 +431,7 @@ export default function useCodeOutput({
             displayElement = (
               <OutputRowStyle {...outputRowSharedProps}>
                 <HTMLOutputStyle monospace>
-                  <InnerHTML html={data} />
+                  <SanitizedHTML html={data} />
                 </HTMLOutputStyle>
               </OutputRowStyle>
             );
