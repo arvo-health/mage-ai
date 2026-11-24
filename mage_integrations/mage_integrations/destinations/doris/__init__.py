@@ -11,6 +11,7 @@ from mage_integrations.destinations.mysql.utils import (
     build_alter_table_command,
     build_create_table_command,
     clean_column_name,
+    convert_array,
     convert_column_to_type,
     convert_column_type,
 )
@@ -130,8 +131,9 @@ WHERE table_name = '{table_name}' AND table_schema = '{database_name}'
             ),
             columns=columns,
             records=records,
+            convert_array_func=convert_array,
             convert_column_to_type_func=convert_column_to_type,
-            string_parse_func=lambda x, y: x.replace("'", "''").replace('\\', '\\\\')
+            string_parse_func=lambda x, y: x.replace("'", "''")
             if COLUMN_TYPE_OBJECT == y['type'] else x,
             use_lowercase=self.use_lowercase,
         )
