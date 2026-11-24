@@ -1,10 +1,10 @@
 import React, { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import Ansi from 'ansi-to-react';
-import InnerHTML from 'dangerously-set-html-content';
 import { ThemeContext } from 'styled-components';
 import { useMutation } from 'react-query';
 
 import AuthToken from '@api/utils/AuthToken';
+import SanitizedHTML from '@components/shared/SanitizedHTML';
 import BlockType, {
   BLOCK_TYPES_NO_DATA_TABLE,
   BlockTypeEnum,
@@ -596,7 +596,7 @@ function CodeOutput(
           return (
             <Spacing pb={PADDING_UNITS} px={PADDING_UNITS}>
               <HTMLOutputStyle monospace>
-                {rows?.map((row, idx) => <InnerHTML html={row} key={`html-row-${idx}`} />)}
+                {rows?.map((row, idx) => <SanitizedHTML html={String(row)} key={`html-row-${idx}`} />)}
               </HTMLOutputStyle>
             </Spacing>
           );
