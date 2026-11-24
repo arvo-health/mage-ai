@@ -7,6 +7,8 @@ from typing import Dict
 from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.GenericResource import GenericResource
 from mage_ai.api.result_set import ResultSet
+from mage_ai.data_preparation.models.errors import FileNotInProjectError
+from mage_ai.data_preparation.models.file import resolve_path_in_project
 from mage_ai.settings.utils import base_repo_path
 from mage_ai.shared.files import get_absolute_paths_from_all_files
 from mage_ai.system.browser.models import Item
@@ -48,12 +50,14 @@ class BrowserItemResource(GenericResource):
         items = []
 
         for dir_path in [directory] + (paths or []):
+            cls.check_path_is_in_project(dir_path)
             items += get_absolute_paths_from_all_files(
                 starting_full_path_directory=dir_path,
                 comparator=lambda path: (
                     not exclude_pattern or not re.search(exclude_pattern, path or '')
                 )
-                and (not include_pattern or re.search(include_pattern, path or '')),
+                and (not include_pattern or re.search(include_pattern, path or ''))
+                and is_path_in_project(path),
                 parse_values=__parse_values,
             )
 
@@ -65,7 +69,9 @@ class BrowserItemResource(GenericResource):
 
     @classmethod
     def get_model(cls, pk, **kwargs) -> Item:
-        return Item.load(path=urllib.parse.unquote(pk))
+        path = urllib.parse.unquote(pk)
+        cls.check_path_is_in_project(path)
+        return Item.load(path=path)
 
     @classmethod
     async def member(cls, pk, user, **kwargs) -> BrowserItemResource:
@@ -76,11 +82,15 @@ class BrowserItemResource(GenericResource):
                 **dict(message=f'Item at path {pk} not found.'),
             })
 
-        await item.get_content()
+        try:
+            await item.get_content()
+        except FileNotInProjectError:
+            cls.raise_not_in_project(item.path)
         return cls(item, user, **kwargs)
 
     @classmethod
     async def create(cls, payload: Dict, user, **kwargs) -> BrowserItemResource:
+        cls.check_path_is_in_project(payload.get('path'))
         model = Item.load(**payload)
         await model.create()
         return cls(model, user, **kwargs)
@@ -92,6 +102,8 @@ class BrowserItemResource(GenericResource):
         if 'path' not in payload:
             payload['path'] = self.model.path
 
+        self.check_path_is_in_project(payload['path'])
+
         try:
             await self.model.synchronize(Item.load(**payload))
         except Exception as err:
@@ -99,3 +111,23 @@ class BrowserItemResource(GenericResource):
                 **ApiError.RESOURCE_INVALID,
                 **dict(message=str(err)),
             })
+
+    @classmethod
+    def check_path_is_in_project(cls, path: str) -> None:
+        if not is_path_in_project(path):
+            cls.raise_not_in_project(path)
+
+    @classmethod
+    def raise_not_in_project(cls, path: str) -> None:
+        raise ApiError({
+            **ApiError.RESOURCE_INVALID,
+            **dict(message=f'Item at path {path} is not in the project directory.'),
+        })
+
+
+def is_path_in_project(path: str) -> bool:
+    try:
+        resolve_path_in_project(path)
+        return True
+    except FileNotInProjectError:
+        return False

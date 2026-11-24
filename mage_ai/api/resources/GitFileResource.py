@@ -4,7 +4,12 @@ from pathlib import Path
 
 from mage_ai.api.resources.GenericResource import GenericResource
 from mage_ai.data_preparation.git import Git
-from mage_ai.data_preparation.models.file import File
+from mage_ai.data_preparation.models.errors import FileNotInProjectError
+from mage_ai.data_preparation.models.file import (
+    File,
+    open_in_project,
+    resolve_path_in_project,
+)
 from mage_ai.settings.utils import base_repo_path
 
 
@@ -33,11 +38,9 @@ class GitFileResource(GenericResource):
 
         file_path_absolute = os.path.join(git_manager.repo_path, file_path)
 
-        # Prevent path traversal by resolving the absolute path location
-        # and checking if it's within the repo
-        if not os.path.abspath(file_path_absolute).startswith(
-            os.path.abspath(git_manager.repo_path)
-        ):
+        try:
+            resolve_path_in_project(file_path_absolute, root=git_manager.repo_path)
+        except FileNotInProjectError:
             raise Exception("Access denied: Attempted path traversal")
 
         file = File.from_path(file_path_absolute)
@@ -75,8 +78,17 @@ class GitFileResource(GenericResource):
             except git.exc.GitCommandError as err:
                 error = str(err)
 
+        content = None
+        if os.path.isfile(file_path_absolute):
+            try:
+                fd = open_in_project(file_path_absolute, os.O_RDONLY, root=git_manager.repo_path)
+            except FileNotInProjectError:
+                raise Exception("Access denied: Attempted path traversal")
+            with open(fd, encoding='utf-8') as fp:
+                content = fp.read()
+
         return self(dict(
-            content=file.content() if os.path.isfile(file.file_path) else None,
+            content=content,
             content_from_base=content_from_base,
             content_from_compare=content_from_compare,
             error=error,

@@ -37,6 +37,7 @@ class FileContentResource(GenericResource):
 
         try:
             ensure_file_is_in_project(file.file_path)
+            file.bind_to_project()
         except FileNotInProjectError:
             error = ApiError.RESOURCE_INVALID.copy()
             error.update(
@@ -54,11 +55,18 @@ class FileContentResource(GenericResource):
             error.update(message='Please provide a content or version in the request payload.')
             raise ApiError(error)
 
-        if version is not None and content is None:
-            file_version = find(lambda f: f.filename == str(version), self.model.file_versions())
-            content = file_version.content()
+        try:
+            if version is not None and content is None:
+                file_version = find(
+                    lambda f: f.filename == str(version),
+                    self.model.file_versions(),
+                )
+                content = file_version.content()
 
-        await self.model.update_content_async(content)
+            await self.model.update_content_async(content)
+        except FileNotInProjectError as err:
+            error.update(message=str(err))
+            raise ApiError(error)
 
         block_type = Block.block_type_from_path(
             self.model.dir_path,

@@ -227,12 +227,14 @@ class FileProjectPlatformTest(ProjectPlatformMixin, AsyncDBTestCase):
                     error = True
                 self.assertTrue(error)
 
-            with patch(
-                'mage_ai.data_preparation.models.file.project_platform_activated',
-                lambda: True,
-            ):
-                with patch(
-                    'mage_ai.data_preparation.models.file.project_platform_activated',
-                    lambda: True,
-                ):
+        with patch(
+            'mage_ai.data_preparation.models.file.project_platform_activated',
+            lambda: True,
+        ):
+            with patch('mage_ai.settings.platform.project_platform_activated', lambda: True):
+                with self.assertRaises(FileNotInProjectError):
                     ensure_file_is_in_project('mage_data/demo/file.txt')
+
+                ensure_file_is_in_project(
+                    os.path.join(base_repo_path(), 'mage_platform', 'demo', 'file.txt'),
+                )
