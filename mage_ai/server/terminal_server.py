@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from typing import Optional, Tuple
 
 import terminado
 from tornado import gen
@@ -10,7 +11,8 @@ from mage_ai.data_preparation.models.errors import FileNotInProjectError
 from mage_ai.data_preparation.models.file import ensure_file_is_in_project
 from mage_ai.data_preparation.repo_manager import get_project_uuid
 from mage_ai.orchestration.constants import Entity
-from mage_ai.orchestration.db.models.oauth import Oauth2Application
+from mage_ai.orchestration.db.models.oauth import Oauth2Application, User
+from mage_ai.server.websocket_auth import authenticate_websocket_request
 from mage_ai.settings import (
     DISABLE_TERMINAL,
     REQUIRE_USER_AUTHENTICATION,
@@ -20,26 +22,40 @@ from mage_ai.shared.array import find_index
 
 
 class MageTermManager(terminado.NamedTermManager):
-    def get_terminal(self, term_name: str, **kwargs):
+    def get_terminal(self, term_name: str, user_id: int = None, **kwargs):
+        """Return the terminal named term_name that belongs to user_id.
+
+        A terminal is only ever shared between sockets of the user that created it.
+        When another user already holds term_name, this user gets their own terminal
+        stored under the key (user_id, term_name), which a client cannot supply.
+        """
         assert term_name is not None
 
-        if term_name in self.terminals:
-            return self.terminals[term_name]
+        term = self.terminals.get(term_name)
+        if term is not None and getattr(term, 'user_id', None) == user_id:
+            return term
+
+        user_key = (user_id, term_name)
+        if user_key in self.terminals:
+            return self.terminals[user_key]
 
         if self.max_terminals and len(self.terminals) >= self.max_terminals:
             raise terminado.management.MaxTerminalsReached(self.max_terminals)
 
+        key = term_name if term is None else user_key
+
         # Create new terminal
-        self.log.info("New terminal with specified name: %s", term_name)
+        self.log.info("New terminal with specified name: %s", key)
         term = self.new_terminal(**kwargs)
-        term.term_name = term_name
-        self.terminals[term_name] = term
+        term.term_name = key
+        term.user_id = user_id
+        self.terminals[key] = term
         self.start_reading(term)
         return term
 
 
 class MageUniqueTermManager(terminado.UniqueTermManager):
-    def get_terminal(self, url_component=None, **kwargs):
+    def get_terminal(self, url_component=None, user_id: int = None, **kwargs):
         if self.max_terminals and len(self.ptys_by_fd) >= self.max_terminals:
             raise terminado.management.MaxTerminalsReached(self.max_terminals)
 
@@ -49,6 +65,8 @@ class MageUniqueTermManager(terminado.UniqueTermManager):
 
 
 class TerminalWebsocketServer(terminado.TermSocket):
+    user_id = None
+
     @property
     def term_command(self):
         return next(iter(self.term_manager.shell_command))
@@ -74,6 +92,14 @@ class TerminalWebsocketServer(terminado.TermSocket):
         # proxies alive. Call super() to allow that to set up:
         super(terminado.TermSocket, self).open(url_component)
 
+        # Authorize before any terminal is created or joined: the read path
+        # (pty output sent to every client of a terminal) has no other check.
+        authorized, user = self.__authorize_connection()
+        if not authorized:
+            self._logger.warning('TermSocket.open: unauthorized, no terminal attached.')
+            return
+        self.user_id = user.id if user else None
+
         cwd = self.get_argument('cwd', None, True)
         if cwd:
             try:
@@ -94,6 +120,23 @@ class TerminalWebsocketServer(terminado.TermSocket):
 
         self.__initialize_terminal(term_name, cwd=cwd)
 
+    def __authorize_connection(self) -> Tuple[bool, Optional[User]]:
+        if DISABLE_TERMINAL or is_disable_pipeline_edit_access():
+            return False, None
+
+        if not REQUIRE_USER_AUTHENTICATION:
+            return True, None
+
+        oauth_token = authenticate_websocket_request(self.request)
+        if not oauth_token or not has_at_least_editor_role(
+            oauth_token.user,
+            Entity.PROJECT,
+            get_project_uuid(),
+        ):
+            return False, None
+
+        return True, oauth_token.user
+
     @gen.coroutine
     def on_message(self, raw_message):
         message = json.loads(raw_message)
@@ -108,7 +151,7 @@ class TerminalWebsocketServer(terminado.TermSocket):
             command[index] = r"clear -x && history -c && history -w && clear -x"
 
         # If terminal access disable return
-        if DISABLE_TERMINAL:
+        if DISABLE_TERMINAL or self.terminal is None:
             return self.send_json_message(
                 ['stdout', f'{command[1]}\nUnauthorized access to the terminal.'])
 
@@ -120,7 +163,8 @@ class TerminalWebsocketServer(terminado.TermSocket):
                 ).first()
                 if oauth_client:
                     oauth_token, valid = authenticate_client_and_token(oauth_client.id, token)
-                    if valid and oauth_token and oauth_token.user:
+                    if valid and oauth_token and oauth_token.user and \
+                            oauth_token.user.id == self.user_id:
                         valid = has_at_least_editor_role(
                             oauth_token.user,
                             Entity.PROJECT,
@@ -136,7 +180,11 @@ class TerminalWebsocketServer(terminado.TermSocket):
         return terminado.TermSocket.on_message(self, json.dumps(command))
 
     def __initialize_terminal(self, term_name: str, cwd: str = None):
-        self.terminal = self.term_manager.get_terminal(term_name, cwd=cwd)
+        self.terminal = self.term_manager.get_terminal(
+            term_name,
+            user_id=self.user_id,
+            cwd=cwd,
+        )
         self.terminal.clients.append(self)
 
         self.send_json_message(["setup", {}])
