@@ -497,12 +497,14 @@ def __get_projects_of_any_type() -> Dict:
     return mapping
 
 
-def __load_platform_settings(full_path: str) -> Dict:
+def __load_platform_settings(full_path: str, render_template: bool = True) -> Dict:
     """
     Load and parse platform settings from the specified file.
 
     Args:
         full_path (str): The full path to the platform settings file.
+        render_template (bool): Render template variables before parsing. Disable for files
+            that are written by the server from request values.
 
     Returns:
         Dict: A dictionary containing the parsed platform settings.
@@ -525,8 +527,12 @@ def __load_platform_settings(full_path: str) -> Dict:
     settings = None
     if os.path.exists(full_path):
         with open(full_path, 'r', encoding='utf-8') as f:
-            content = Template(f.read()).render(**get_template_vars_no_db())
-            settings = yaml.full_load(content) or {}
+            content = f.read()
+            if render_template:
+                content = Template(content).render(**get_template_vars_no_db())
+                settings = yaml.full_load(content) or {}
+            else:
+                settings = yaml.safe_load(content) or {}
 
     return settings
 
@@ -554,7 +560,10 @@ def __local_platform_settings(repo_path: str = None) -> Dict:
         >>> __local_platform_settings('/path/to/repo')
         {'projects': {'mage_data': {'active': True}, 'mage_platform': {'active': False}}}
     """
-    return __load_platform_settings(local_platform_settings_full_path(repo_path=repo_path))
+    return __load_platform_settings(
+        local_platform_settings_full_path(repo_path=repo_path),
+        render_template=False,
+    )
 
 
 def __update_local_platform_settings(
