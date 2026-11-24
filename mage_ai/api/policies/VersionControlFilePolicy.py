@@ -12,17 +12,30 @@ class VersionControlFilePolicy(BasePolicy):
 
 VersionControlFilePolicy.allow_actions(
     [
-        OperationType.CREATE,
-        OperationType.DELETE,
         OperationType.DETAIL,
         OperationType.LIST,
-        OperationType.UPDATE,
     ],
     scopes=[
         OauthScope.CLIENT_PRIVATE,
     ],
     condition=lambda policy: policy.has_at_least_editor_role(),
-    override_permission_condition=lambda _policy: True,
+    override_permission_condition=lambda policy: policy.has_at_least_editor_role(),
+)
+
+
+VersionControlFilePolicy.allow_actions(
+    [
+        OperationType.CREATE,
+        OperationType.DELETE,
+        OperationType.UPDATE,
+    ],
+    scopes=[
+        OauthScope.CLIENT_PRIVATE,
+    ],
+    condition=lambda policy: policy.has_at_least_editor_role_and_notebook_edit_access(),
+    override_permission_condition=lambda policy: (
+        policy.has_at_least_editor_role_and_notebook_edit_access()
+    ),
 )
 
 
@@ -39,7 +52,7 @@ VersionControlFilePolicy.allow_read(
         OperationType.UPDATE,
     ],
     condition=lambda policy: policy.has_at_least_editor_role(),
-    override_permission_condition=lambda _policy: True,
+    override_permission_condition=lambda policy: policy.has_at_least_editor_role(),
 )
 
 
@@ -53,8 +66,10 @@ VersionControlFilePolicy.allow_write(
     on_action=[
         OperationType.CREATE,
     ],
-    condition=lambda policy: policy.has_at_least_editor_role(),
-    override_permission_condition=lambda _policy: True,
+    condition=lambda policy: policy.has_at_least_editor_role_and_notebook_edit_access(),
+    override_permission_condition=lambda policy: (
+        policy.has_at_least_editor_role_and_notebook_edit_access()
+    ),
 )
 
 
@@ -72,8 +87,10 @@ VersionControlFilePolicy.allow_write(
     on_action=[
         OperationType.UPDATE,
     ],
-    condition=lambda policy: policy.has_at_least_editor_role(),
-    override_permission_condition=lambda _policy: True,
+    condition=lambda policy: policy.has_at_least_editor_role_and_notebook_edit_access(),
+    override_permission_condition=lambda policy: (
+        policy.has_at_least_editor_role_and_notebook_edit_access()
+    ),
 )
 
 VersionControlFilePolicy.allow_query(
@@ -87,5 +104,5 @@ VersionControlFilePolicy.allow_query(
         OperationType.LIST,
     ],
     condition=lambda policy: policy.has_at_least_editor_role(),
-    override_permission_condition=lambda _policy: True,
+    override_permission_condition=lambda policy: policy.has_at_least_editor_role(),
 )
