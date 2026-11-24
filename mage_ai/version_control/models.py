@@ -7,7 +7,7 @@ import subprocess
 import time
 from asyncio.subprocess import PIPE, STDOUT
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List
+from typing import Any, Dict, List
 
 from mage_ai.authentication.oauth.constants import ProviderName
 from mage_ai.data_preparation.git.api import get_user
@@ -29,6 +29,102 @@ from mage_ai.shared.hash import merge_dict
 from mage_ai.shared.models import BaseDataClass
 from mage_ai.version_control.branch import utils as branch_utils
 
+# Subcommands that can be run through the free-form git command field.
+ALLOWED_GIT_SUBCOMMANDS = frozenset([
+    'add',
+    'blame',
+    'branch',
+    'checkout',
+    'cherry-pick',
+    'commit',
+    'diff',
+    'fetch',
+    'log',
+    'ls-files',
+    'merge',
+    'mv',
+    'pull',
+    'push',
+    'rebase',
+    'reflog',
+    'remote',
+    'reset',
+    'restore',
+    'revert',
+    'rm',
+    'shortlog',
+    'show',
+    'stash',
+    'status',
+    'switch',
+    'tag',
+])
+
+# Options that make git run another program, write to an arbitrary path, or read a
+# file from outside the repository. Git accepts unambiguous prefixes of long options,
+# so these are matched by prefix.
+BLOCKED_GIT_LONG_OPTIONS = (
+    '--config',
+    '--contents',
+    '--exec',
+    '--exec-path',
+    '--ext-diff',
+    '--file',
+    '--git-dir',
+    '--no-index',
+    '--open-files-in-pager',
+    '--output',
+    '--output-directory',
+    '--pathspec-from-file',
+    '--receive-pack',
+    '--template',
+    '--textconv',
+    '--upload-pack',
+    '--work-tree',
+)
+
+BLOCKED_GIT_SHORT_OPTIONS = {
+    'blame': frozenset('S'),
+    'commit': frozenset('Ft'),
+    'rebase': frozenset('x'),
+    'tag': frozenset('F'),
+}
+
+
+def is_option_like(value: str) -> bool:
+    return isinstance(value, str) and value.startswith('-')
+
+
+def validate_git_command_args(args: List[str]) -> str:
+    """Returns an error message if the arguments are not allowed, otherwise None."""
+    if not args:
+        return 'error: no git command was provided.'
+
+    subcommand = args[0]
+    if subcommand not in ALLOWED_GIT_SUBCOMMANDS:
+        return f'error: git command "{subcommand}" is not allowed.'
+
+    blocked_short = BLOCKED_GIT_SHORT_OPTIONS.get(subcommand, frozenset())
+    for arg in args[1:]:
+        if arg == '--':
+            break
+
+        if arg.startswith('--'):
+            name = arg.split('=', 1)[0]
+            if len(name) > 2 and any(opt.startswith(name) for opt in BLOCKED_GIT_LONG_OPTIONS):
+                return f'error: git option "{name}" is not allowed.'
+        elif arg.startswith('-') and blocked_short.intersection(arg[1:]):
+            return f'error: git option "{arg}" is not allowed.'
+
+    return None
+
+
+def split_names(text: str) -> List[str]:
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return text.split()
+
 
 @dataclass
 class BaseVersionControl(BaseDataClass):
@@ -45,36 +141,28 @@ class BaseVersionControl(BaseDataClass):
         import git
         return git.Repo(self.project.repo_path)
 
-    def prepare_commands(self, command: str, encode_command: Callable = None) -> List[str]:
+    def prepare_commands(self, args: List[str]) -> List[str]:
+        if isinstance(args, str):
+            raise TypeError('Git commands must be passed as a list of arguments.')
+
         args = [
             'git',
             '-C',
             self.repo_path,
-        ] + shlex.split(command)
+        ] + [str(arg) for arg in args]
 
-        if encode_command:
-            args = [encode_command(arg) for arg in args]
-
-        print(f'[VersionControl] Run: {" ".join(args)}')
+        print(f'[VersionControl] Run: {shlex.join(args)}')
 
         return args
 
     async def run_async(
         self,
-        command: str,
-        encode_command: Callable = None,
+        args: List[str],
         timeout: int = 12,
     ) -> List[str]:
-        # proc = await asyncio.create_subprocess_shell(
-        #     ' '.join(self.prepare_commands(command)),
-        #     stdin=PIPE,
-        #     stdout=PIPE,
-        #     stderr=STDOUT,
-        # )
-
         proc = await asyncio.wait_for(
-            asyncio.create_subprocess_shell(
-                ' '.join(self.prepare_commands(command, encode_command=encode_command)),
+            asyncio.create_subprocess_exec(
+                *self.prepare_commands(args),
                 stdin=PIPE,
                 stdout=PIPE,
                 stderr=STDOUT,
@@ -85,18 +173,18 @@ class BaseVersionControl(BaseDataClass):
         output = await proc.stdout.read()
         return self.add_outputs(output.decode().split('\n') if output else output)
 
-    def run(self, command: str) -> List[str]:
+    def run(self, args: List[str]) -> List[str]:
         proc = subprocess.run(
-            self.prepare_commands(command),
+            self.prepare_commands(args),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
 
         return self.add_outputs(proc.stdout.decode().split('\n'))
 
-    def run_with_inputs(self, command: str, message: str) -> List[str]:
+    def run_with_inputs(self, args: List[str], message: str) -> List[str]:
         proc = subprocess.Popen(
-            self.prepare_commands(command),
+            self.prepare_commands(args),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
@@ -191,19 +279,19 @@ class Remote(BaseVersionControl):
         return self
 
     def list(self) -> List[str]:
-        return self.run('remote -v')
+        return self.run(['remote', '-v'])
 
     def create(self) -> List[str]:
-        return self.run(f'remote add {self.name} {self.url}')
+        return self.run(['remote', 'add', '--', self.name, self.url])
 
     def delete(self) -> List[str]:
-        return self.run(f'remote rm {self.name}')
+        return self.run(['remote', 'rm', '--', self.name])
 
     def update(self, fetch: bool = False, set_url: bool = False) -> List[str]:
         if fetch:
-            return self.run(f'fetch {self.name}')
+            return self.run(['fetch', '--', self.name])
         elif set_url:
-            return self.run(f'remote set-url {self.name} {self.url}')
+            return self.run(['remote', 'set-url', '--', self.name, self.url])
 
         return ['Nothing was done.']
 
@@ -257,7 +345,7 @@ class Branch(BaseVersionControl):
             # Need to fake a local branch until user makes a commit.
             name = 'master'
 
-            output = base.run('reflog')
+            output = base.run(['reflog'])
             if output:
                 parts = output[0].split("'")
                 if len(parts) == 3:
@@ -294,7 +382,7 @@ class Branch(BaseVersionControl):
 
     def get_current_branch(self) -> 'Branch':
         return find(lambda x: x.current, self.load_all(
-            lines=self.run('branch'),
+            lines=self.run(['branch']),
             project=self.project,
             remote=self.remote,
         ))
@@ -304,10 +392,25 @@ class Branch(BaseVersionControl):
         if include_all:
             commands.append('-a')
 
-        return self.run(' '.join(commands))
+        return self.run(commands)
+
+    def invalid_name_error(self) -> List[str]:
+        names = [self.name]
+        if self.remote and self.remote.name:
+            names.append(self.remote.name)
+
+        for name in names:
+            if is_option_like(name):
+                return self.add_outputs([f'error: invalid branch or remote name "{name}".'])
+
+        return None
 
     def create(self) -> List[str]:
-        return self.run(f'checkout -b {self.name}')
+        error = self.invalid_name_error()
+        if error:
+            return error
+
+        return self.run(['checkout', '-b', self.name])
 
     def detail(self, **kwargs) -> List[str]:
         return []
@@ -316,7 +419,7 @@ class Branch(BaseVersionControl):
         flag = 'd'
         if force:
             flag = flag.upper()
-        return self.run(f'branch -{flag} {name or self.name}')
+        return self.run(['branch', f'-{flag}', '--', name or self.name])
 
     async def update_async(
         self,
@@ -327,37 +430,39 @@ class Branch(BaseVersionControl):
         push: bool = False,
         rebase: bool = False,
     ) -> List[str]:
+        error = self.invalid_name_error()
+        if error:
+            return error
+
         commands = []
 
         if clone:
-            commands.append(f'clone -b {self.name}')
+            commands.extend(['clone', '-b', self.name, '--'])
             if self.remote and self.remote.url:
                 commands.append(self.remote.url)
         elif pull or rebase:
-            commands.append('rebase' if rebase else 'pull')
+            commands.extend(['rebase' if rebase else 'pull', '--'])
             if self.remote and self.remote.name:
                 commands.append(self.remote.name)
             commands.append(self.name)
-        elif checkout or merge:
-            commands.extend(['merge' if merge else 'checkout', self.name])
+        elif merge:
+            commands.extend(['merge', '--', self.name])
+        elif checkout:
+            # The trailing "--" makes git treat the name as a branch, never as a path.
+            commands.extend(['checkout', self.name, '--'])
         elif push:
-            commands.append('push -u')
-            if self.remote and self.remote.name:
-                commands.append(self.remote.name)
-            commands.append(self.name)
-
             self.project.set_user_config()
             if AuthType.SSH == self.project.auth_type:
-                # ' '.join(commands)
                 return await execute_on_remote_branch(self.git.push, self)(
                     '--set-upstream',
+                    '--',
                     self.remote.name,
                     self.name,
                 )
             else:
                 return await branch_utils.push(self)
 
-        lines = await self.run_async(' '.join(commands))
+        lines = await self.run_async(commands)
         self.hydrate()
 
         return lines
@@ -412,9 +517,9 @@ class File(BaseVersionControl):
     def diff_stats(self, include_all: bool = False) -> Dict:
         lines = []
         if include_all:
-            lines.extend(self.run('diff --stat'))
+            lines.extend(self.run(['diff', '--stat']))
         else:
-            lines.extend(self.run(f'diff --stat {self.name}'))
+            lines.extend(self.run(['diff', '--stat', '--', self.name]))
 
         mapping = {}
 
@@ -457,27 +562,27 @@ class File(BaseVersionControl):
         # A file can belong to staged and unstaged because it has unstaged modifications.
         outputs = []
         if staged:
-            outputs.extend(self.run('diff --name-only --staged'))
+            outputs.extend(self.run(['diff', '--name-only', '--staged']))
 
         # Files with unstaged changes
         if unstaged:
-            outputs.extend(self.run('diff --name-only'))
+            outputs.extend(self.run(['diff', '--name-only']))
 
         if untracked:
-            outputs.extend(self.run('ls-files --others --exclude-standard'))
+            outputs.extend(self.run(['ls-files', '--others', '--exclude-standard']))
 
         if not staged and not unstaged and not untracked:
-            outputs.extend(self.run('ls-files --other --modified --exclude-standard'))
+            outputs.extend(self.run(['ls-files', '--other', '--modified', '--exclude-standard']))
 
         self.output = outputs
 
         return outputs
 
     def create(self) -> List[str]:
-        return self.run(f'add {self.name}')
+        return self.run(['add', '--', self.name])
 
     async def detail_async(self) -> List[str]:
-        self.diff = await self.run_async(f'diff {self.name}')
+        self.diff = await self.run_async(['diff', '--', self.name])
         return self.diff
 
     async def read_content_async(self) -> str:
@@ -486,7 +591,7 @@ class File(BaseVersionControl):
             return self.content
 
     def detail(self) -> List[str]:
-        self.diff = self.run(f'diff {self.name}')
+        self.diff = self.run(['diff', '--', self.name])
         return self.diff
 
     async def update_async(
@@ -497,22 +602,30 @@ class File(BaseVersionControl):
         reset: str = False,
     ) -> List[str]:
         if add:
-            return await self.run_async(f'add {add}')
+            return await self.run_async(['add', '--'] + split_names(add))
         elif command:
-            return await self.run_async(re.sub(r'^git', '', command.strip()).strip())
+            try:
+                args = shlex.split(command)
+            except ValueError as err:
+                return self.add_outputs([f'error: {err}'])
+
+            if args and args[0] == 'git':
+                args = args[1:]
+
+            error = validate_git_command_args(args)
+            if error:
+                return self.add_outputs([error])
+
+            return await self.run_async(args)
         elif commit:
-            def __encode_command(command_arg: str, commit=commit) -> str:
-                if command_arg == commit:
-                    return f'"{command_arg}"'
-                return command_arg
-            return await self.run_async(f'commit -m "{commit}"', encode_command=__encode_command)
+            return await self.run_async(['commit', '-m', commit])
         elif reset:
-            return await self.run_async(f'reset {reset}')
+            return await self.run_async(['reset', '--'] + split_names(reset))
 
         return ['Nothing was done.']
 
     def delete(self) -> List[str]:
-        return self.run(f'checkout {self.name}')
+        return self.run(['checkout', '--', self.name])
 
     def get_file_path(self) -> str:
         return self.file_path or os.path.join(self.repo_path, self.name)
@@ -569,11 +682,11 @@ class ProjectUser(BaseVersionControl):
             )
             self.name = user_from_api.get('username') or self.name
         else:
-            user_email = self.run('config user.email')
+            user_email = self.run(['config', 'user.email'])
             if user_email:
                 self.email = ' '.join(user_email).replace('"', '').strip()
 
-            user_name = self.run('config user.name')
+            user_name = self.run(['config', 'user.name'])
             if user_name:
                 self.name = ' '.join(user_name).replace('"', '').strip()
 
@@ -678,7 +791,7 @@ class Project(BaseVersionControl):
         if os.path.exists(git_path):
             return [f'.git already exists in {git_path}.']
         else:
-            return self.run('init')
+            return self.run(['init'])
 
     def update(self, settings: Dict = None):
         self.preferences.update_preferences(settings)
@@ -716,9 +829,9 @@ class Project(BaseVersionControl):
 
     def configure(self, email: str = None, name: str = None) -> List[str]:
         if email:
-            return self.run(f'config --global user.email "{email}"')
+            return self.run(['config', '--global', '--', 'user.email', email])
         if name:
-            return self.run(f'config --global user.name "{name}"')
+            return self.run(['config', '--global', '--', 'user.name', name])
 
         return ['Nothing was done.']
 
