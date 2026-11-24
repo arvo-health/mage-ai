@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import List, Tuple
 
 from mage_ai.api.errors import ApiError
+from mage_ai.data_preparation.repo_manager import get_project_uuid
 from mage_ai.orchestration.constants import Entity
 from mage_ai.orchestration.db.models.oauth import (
     Oauth2AccessToken,
@@ -101,6 +102,29 @@ def has_at_least_viewer_role(
         has_at_least_editor_role(user, entity, entity_id) or \
         (user.roles and user.roles & 4 != 0) or \
         (user and user.get_access(entity, entity_id) & Permission.Access.VIEWER != 0)
+
+
+def has_at_least_editor_role_for_pipeline_schedule(user: User, pipeline_schedule) -> bool:
+    return has_at_least_editor_role(
+        user,
+        Entity.PIPELINE,
+        pipeline_schedule.pipeline_uuid,
+    )
+
+
+def has_at_least_editor_role_for_event_matcher(user: User, event_matcher) -> bool:
+    """
+    Changing an event matcher changes when every schedule bound to it runs, so the user must
+    be able to edit all of them. A matcher bound to no schedule belongs to the project.
+    """
+    pipeline_schedules = event_matcher.pipeline_schedules
+    if not pipeline_schedules:
+        return has_at_least_editor_role(user, Entity.PROJECT, get_project_uuid())
+
+    return all(
+        has_at_least_editor_role_for_pipeline_schedule(user, pipeline_schedule)
+        for pipeline_schedule in pipeline_schedules
+    )
 
 
 def get_access_for_roles(

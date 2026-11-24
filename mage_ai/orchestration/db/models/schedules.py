@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from math import ceil
 from statistics import stdev
-from typing import DefaultDict, Dict, List
+from typing import DefaultDict, Dict, List, Optional, Tuple
 
 import dateutil.parser
 import pytz
@@ -1946,12 +1946,6 @@ class EventMatcher(BaseModel):
 
     @classmethod
     def upsert_batch(self, event_matchers_payload):
-        keys_to_ignore = [
-            'created_at',
-            'id',
-            'updated_at',
-        ]
-
         new_arr = []
         existing_arr = []
 
@@ -1970,28 +1964,55 @@ class EventMatcher(BaseModel):
             ).all(),
         )
 
-        event_matchers_and_pipeline_schedule_ids = []
         event_matchers_by_id = index_by(
             lambda x: x.id,
             self.query.filter(
                 self.id.in_([p['id'] for p in existing_arr]),
             ).all(),
         )
-        for payload in existing_arr:
-            ids = payload.pop('pipeline_schedule_ids', None)
-            event_matcher = event_matchers_by_id[payload['id']]
-            event_matcher.update(**ignore_keys(payload, keys_to_ignore))
-            event_matchers_and_pipeline_schedule_ids.append((event_matcher, ids))
 
-        for payload in new_arr:
+        entries = []
+        for payload in existing_arr + new_arr:
+            payload = payload.copy()
             ids = payload.pop('pipeline_schedule_ids', None)
-            event_matcher = self.create(**ignore_keys(payload, keys_to_ignore))
-            event_matchers_and_pipeline_schedule_ids.append((event_matcher, ids))
-
-        for event_matcher, ids in event_matchers_and_pipeline_schedule_ids:
+            pipeline_schedules = None
             if ids is not None:
-                ps = [pipeline_schedules_by_id[i] for i in [int(i) for i in ids]]
-                event_matcher.update(pipeline_schedules=ps)
+                pipeline_schedules = [pipeline_schedules_by_id[int(i)] for i in ids]
+            event_matcher = event_matchers_by_id[payload['id']] if payload.get('id') else None
+            entries.append((event_matcher, payload, pipeline_schedules))
+
+        return self.save_batch(entries)
+
+    @classmethod
+    def save_batch(
+        self,
+        entries: List[Tuple[Optional['EventMatcher'], Dict, Optional[List[PipelineSchedule]]]],
+    ) -> List['EventMatcher']:
+        """
+        Each entry is (existing event matcher or None to create one, attributes to write,
+        pipeline schedules to bind or None to leave the bindings unchanged). The objects in
+        each entry are written as given; nothing is looked up again.
+        """
+        keys_to_ignore = [
+            'created_at',
+            'id',
+            'pipeline_schedule_ids',
+            'pipeline_schedules',
+            'updated_at',
+        ]
+
+        event_matchers_and_pipeline_schedules = []
+        for event_matcher, payload, pipeline_schedules in entries:
+            attributes = ignore_keys(payload, keys_to_ignore)
+            if event_matcher is None:
+                event_matcher = self.create(**attributes)
+            else:
+                event_matcher.update(**attributes)
+            event_matchers_and_pipeline_schedules.append((event_matcher, pipeline_schedules))
+
+        for event_matcher, pipeline_schedules in event_matchers_and_pipeline_schedules:
+            if pipeline_schedules is not None:
+                event_matcher.update(pipeline_schedules=list(pipeline_schedules))
 
             if event_matcher.event_type == EventMatcher.EventType.AWS_EVENT:
                 from mage_ai.services.aws.events.events import update_event_rule_targets
@@ -1999,14 +2020,17 @@ class EventMatcher(BaseModel):
                 # For AWS event, update related AWS infra (add trigger to lambda function)
                 update_event_rule_targets(event_matcher.name)
 
-        return [t[0] for t in event_matchers_and_pipeline_schedule_ids]
+        return [t[0] for t in event_matchers_and_pipeline_schedules]
 
     def active_pipeline_schedules(self) -> List[PipelineSchedule]:
         return [p for p in self.pipeline_schedules if p.status == ScheduleStatus.ACTIVE]
 
     def match(self, config: Dict) -> bool:
+        # An empty pattern, at any level, must never act as a rule that matches every event.
         def __match_dict(sub_pattern, sub_config):
             if type(sub_pattern) is not dict or type(sub_config) is not dict:
+                return False
+            if len(sub_pattern) == 0:
                 return False
             for k in sub_pattern.keys():
                 if k not in sub_config:

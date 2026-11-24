@@ -1945,7 +1945,32 @@ def gen_pipeline_with_schedules_project_platform(
             yield pipeline_uuid, pipeline, active_schedules
 
 
-def schedule_with_event(event: Dict = None):
+def get_pipeline_schedules_matching_event(event: Dict = None) -> List[PipelineSchedule]:
+    """
+    Evaluate event matchers and get active pipeline schedules for each matched event matcher.
+
+    Args:
+        event (Dict): the trigger event
+    """
+    if event is None:
+        event = dict()
+    all_event_matchers = EventMatcher.active_event_matchers()
+
+    matched_pipeline_schedules = []
+    for e in all_event_matchers:
+        if e.match(event):
+            logger.info(f'Event matched with {e}')
+            matched_pipeline_schedules.extend(e.active_pipeline_schedules())
+        else:
+            logger.info(f'Event not matched with {e}')
+
+    return matched_pipeline_schedules
+
+
+def schedule_with_event(
+    event: Dict = None,
+    pipeline_schedules: List[PipelineSchedule] = None,
+):
     """
     This method manages the scheduling and execution of pipeline runs for event triggered
     schedules. The logic is relatively similar to the `schedule_all()` method.
@@ -1956,19 +1981,16 @@ def schedule_with_event(event: Dict = None):
 
     Args:
         event (Dict): the trigger event
+        pipeline_schedules (List[PipelineSchedule]): when provided, start runs for exactly
+            these schedules instead of evaluating the event matchers again.
     """
     if event is None:
         event = dict()
     logger.info(f'Schedule with event {event}')
-    all_event_matchers = EventMatcher.active_event_matchers()
-
-    matched_pipeline_schedules = []
-    for e in all_event_matchers:
-        if e.match(event):
-            logger.info(f'Event matched with {e}')
-            matched_pipeline_schedules.extend(e.active_pipeline_schedules())
-        else:
-            logger.info(f'Event not matched with {e}')
+    if pipeline_schedules is None:
+        matched_pipeline_schedules = get_pipeline_schedules_matching_event(event)
+    else:
+        matched_pipeline_schedules = list(pipeline_schedules)
 
     if len(matched_pipeline_schedules) > 0:
         from mage_ai.orchestration.triggers.utils import create_and_start_pipeline_run
