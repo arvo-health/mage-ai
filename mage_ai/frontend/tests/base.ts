@@ -1,5 +1,6 @@
 import { FeatureUUIDEnum } from '@interfaces/ProjectType';
 import { test as base, expect } from '@playwright/test';
+import { TEST_OWNER_EMAIL, TEST_OWNER_PASSWORD } from './owner';
 import { TSettingFeaturesToDisable, enableSettings } from './utils';
 
 export const test = base.extend<{
@@ -19,9 +20,9 @@ export const test = base.extend<{
 
     await page.goto('/sign-in');
     await page.getByPlaceholder('Email').click();
-    await page.getByRole('textbox').first().fill('admin@admin.com');
+    await page.getByRole('textbox').first().fill(process.env.DEFAULT_OWNER_EMAIL || TEST_OWNER_EMAIL);
     await page.getByRole('textbox').first().press('Tab');
-    await page.locator('input[type="password"]').fill('admin');
+    await page.locator('input[type="password"]').fill(process.env.DEFAULT_OWNER_PASSWORD || TEST_OWNER_PASSWORD);
     await page.locator('input[type="password"]').press('Enter');
 
     /*

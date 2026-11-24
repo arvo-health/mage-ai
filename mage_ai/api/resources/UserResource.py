@@ -3,6 +3,7 @@ from mage_ai.api.resources.DatabaseResource import DatabaseResource
 from mage_ai.api.utils import get_access_for_roles
 from mage_ai.authentication.oauth2 import encode_token, generate_access_token
 from mage_ai.authentication.passwords import (
+    MIN_PASSWORD_LENGTH,
     create_bcrypt_hash,
     generate_salt,
     verify_password,
@@ -74,9 +75,9 @@ class UserResource(DatabaseResource):
                     {'message': f'Account with same username is already taken: {username}.'})
                 raise ApiError(error)
 
-        if len(password) < 8:
+        if len(password) < MIN_PASSWORD_LENGTH:
             error.update(
-                {'message': 'Password must be 8 characters or longer.'})
+                {'message': f'Password must be {MIN_PASSWORD_LENGTH} characters or longer.'})
             raise ApiError(error)
 
         if password != password_confirmation:
@@ -162,9 +163,9 @@ class UserResource(DatabaseResource):
                         {'message': 'Current password is incorrect.'})
                     raise ApiError(error)
 
-            if len(password) < 8:
+            if len(password) < MIN_PASSWORD_LENGTH:
                 error.update(
-                    {'message': 'Password must be 8 characters or longer.'})
+                    {'message': f'Password must be {MIN_PASSWORD_LENGTH} characters or longer.'})
                 raise ApiError(error)
 
             if password != password_confirmation:

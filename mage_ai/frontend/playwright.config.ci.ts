@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { TEST_OWNER_EMAIL, TEST_OWNER_PASSWORD } from './tests/owner';
 
 /**
  * Read environment variables from file.
@@ -49,6 +50,8 @@ export default defineConfig({
     command: 'python mage_ai/cli/main.py start test_project',
     cwd: '../../',
     env: {
+      DEFAULT_OWNER_EMAIL: TEST_OWNER_EMAIL,
+      DEFAULT_OWNER_PASSWORD: TEST_OWNER_PASSWORD,
       PYTHONPATH: '.',
       REQUIRE_USER_AUTHENTICATION: '1',
     },

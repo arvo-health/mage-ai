@@ -109,7 +109,9 @@ except ValueError:
 OAUTH_DEFAULT_ACCESS = os.getenv('OAUTH_DEFAULT_ACCESS')
 
 DEFAULT_OWNER_EMAIL = os.getenv('DEFAULT_OWNER_EMAIL') or 'admin@admin.com'
-DEFAULT_OWNER_PASSWORD = os.getenv('DEFAULT_OWNER_PASSWORD') or 'admin'
+# There is intentionally no fallback: the owner user is only created from a password
+# that the operator supplies.
+DEFAULT_OWNER_PASSWORD = os.getenv('DEFAULT_OWNER_PASSWORD') or None
 DEFAULT_OWNER_USERNAME = os.getenv('DEFAULT_OWNER_USERNAME') or 'admin'
 
 # ---------------------

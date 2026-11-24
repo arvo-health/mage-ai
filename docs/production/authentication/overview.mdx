@@ -86,21 +86,25 @@ permissions (e.g. all permissions).
 
 The owner user can create, edit, and delete other users.
 
-Here are the default credentials for the owner user to sign in with:
+Mage has no built-in owner password. Before starting Mage for the first time with user
+authentication enabled, set `DEFAULT_OWNER_PASSWORD` to a unique password of at least 8
+characters. If no owner user exists and `DEFAULT_OWNER_PASSWORD` is unset or too short, Mage
+refuses to start.
 
-| Field | Value |
-| --- | --- |
-| Email | `admin@admin.com` |
-| Password | `admin` |
+The owner user is created from these environment variables:
+
+| Environment variable | Description | Default |
+| --- | --- | --- |
+| `DEFAULT_OWNER_EMAIL` | Email of the owner user | `admin@admin.com` |
+| `DEFAULT_OWNER_PASSWORD` | Password of the owner user (required, at least 8 characters) | None |
+| `DEFAULT_OWNER_USERNAME` | Username of the owner user | `admin` |
 
 <Note>
     Available in versions >= `0.9.72`
 </Note>
 
-To customize the email, password and username of the default owner user, you can configure these environment variables:
-* `DEFAULT_OWNER_EMAIL`
-* `DEFAULT_OWNER_PASSWORD`
-* `DEFAULT_OWNER_USERNAME`
+These variables are only read when the owner user is created. After you sign in, you can change
+the owner's password from the user management page.
 
 ## Sign in page
 
