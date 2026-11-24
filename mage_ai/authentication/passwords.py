@@ -1,4 +1,10 @@
+import secrets
+
 import bcrypt
+
+
+def generate_password() -> str:
+    return secrets.token_urlsafe(18)
 
 
 def generate_salt() -> str:

@@ -44,7 +44,11 @@ INIT_PROJECT_UUID_DEFAULT = typer.Option(
 START_PROJECT_PATH_DEFAULT = typer.Argument(
     os.getcwd(), help='path of the Mage project to be loaded.'
 )
-START_HOST_DEFAULT = typer.Option('localhost', help='specify the host.')
+START_HOST_DEFAULT = typer.Option(
+    'localhost',
+    envvar='MAGE_LISTEN_ADDRESS',
+    help='specify the host address the server listens on.',
+)
 START_PORT_DEFAULT = typer.Option('6789', help='specify the port.')
 START_MANAGE_INSTANCE_DEFAULT = typer.Option('0', help='')
 START_DBT_DOCS_INSTANCE_DEFAULT = typer.Option('0', help='')

@@ -71,5 +71,6 @@ WORKDIR /home/src/mage_ai/frontend
 RUN yarn install && yarn cache clean
 
 ENV MAGE_DATA_DIR=
+ENV MAGE_LISTEN_ADDRESS="0.0.0.0"
 ENV PYTHONPATH="${PYTHONPATH}:/home/src"
 WORKDIR /home/src
