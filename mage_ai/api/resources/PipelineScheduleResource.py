@@ -7,7 +7,9 @@ from sqlalchemy import case
 from sqlalchemy.orm import joinedload
 from sqlalchemy.sql.expression import func
 
+from mage_ai.api.errors import ApiError
 from mage_ai.api.resources.DatabaseResource import DatabaseResource
+from mage_ai.api.utils import has_at_least_editor_role_for_event_matcher
 from mage_ai.data_preparation.models.pipeline import Pipeline
 from mage_ai.data_preparation.models.triggers import (
     ScheduleStatus,
@@ -279,6 +281,22 @@ class PipelineScheduleResource(DatabaseResource):
 
         return super().create(payload, user, **kwargs)
 
+    def __authorize_event_matchers(self, arr):
+        entries = []
+        for p in arr:
+            event_matcher = None
+            if p.get('id'):
+                event_matcher = EventMatcher.query.get(int(p['id']))
+                if event_matcher is None:
+                    raise ApiError(ApiError.RESOURCE_NOT_FOUND)
+                if not has_at_least_editor_role_for_event_matcher(
+                    self.current_user,
+                    event_matcher,
+                ):
+                    raise ApiError(ApiError.UNAUTHORIZED_ACCESS)
+            entries.append((event_matcher, p, [self.model]))
+        return entries
+
     @safe_db_query
     def update(self, payload, **kwargs):
         # Update associated event matchers
@@ -286,8 +304,8 @@ class PipelineScheduleResource(DatabaseResource):
         event_matchers = []
         if arr is not None:
             if len(arr) >= 1:
-                event_matchers = EventMatcher.upsert_batch(
-                    [merge_dict(p, dict(pipeline_schedule_ids=[self.id])) for p in arr],
+                event_matchers = EventMatcher.save_batch(
+                    self.__authorize_event_matchers(arr),
                 )
 
             ems = (
