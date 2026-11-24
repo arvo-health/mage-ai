@@ -8,7 +8,7 @@ import traceback
 import webbrowser
 from datetime import datetime
 from time import sleep
-from typing import Optional, Union
+from typing import List, Optional, Tuple, Union
 
 import pytz
 import tornado.ioloop
@@ -20,7 +20,12 @@ from tornado.log import enable_pretty_logging
 from tornado.options import options
 from watchdog.observers import Observer
 
-from mage_ai.authentication.passwords import create_bcrypt_hash, generate_salt
+from mage_ai.authentication.passwords import (
+    create_bcrypt_hash,
+    generate_password,
+    generate_salt,
+    verify_password,
+)
 from mage_ai.cache.block import BlockCache
 from mage_ai.cache.block_action_object import BlockActionObjectCache
 from mage_ai.cache.dbt.cache import DBTCache
@@ -45,7 +50,12 @@ from mage_ai.data_preparation.shared.constants import MANAGE_ENV_VAR
 from mage_ai.orchestration.constants import Entity
 from mage_ai.orchestration.db import db_connection, safe_db_query, set_db_schema
 from mage_ai.orchestration.db.database_manager import database_manager
-from mage_ai.orchestration.db.models.oauth import Oauth2Application, Role, User
+from mage_ai.orchestration.db.models.oauth import (
+    Oauth2AccessToken,
+    Oauth2Application,
+    Role,
+    User,
+)
 from mage_ai.orchestration.utils.distributed_lock import DistributedLock
 from mage_ai.server.api.base import BaseHandler
 from mage_ai.server.api.blocks import ApiPipelineBlockAnalysisHandler
@@ -95,6 +105,7 @@ from mage_ai.settings import (
     DISABLE_AUTO_BROWSER_OPEN,
     DISABLE_AUTORELOAD,
     ENABLE_PROMETHEUS,
+    MAGE_LISTEN_ADDRESS,
     OAUTH2_APPLICATION_CLIENT_ID,
     OTEL_EXPORTER_OTLP_ENDPOINT,
     REDIS_URL,
@@ -109,6 +120,7 @@ from mage_ai.settings import (
     get_settings_value,
 )
 from mage_ai.settings.keys import LDAP_ADMIN_USERNAME
+from mage_ai.settings.server import _LEGACY_DEFAULT_OWNER_PASSWORD
 from mage_ai.settings.repo import (
     DEFAULT_MAGE_DATA_DIR,
     MAGE_CLUSTER_TYPE_ENV_VAR,
@@ -486,6 +498,73 @@ def make_app(
     )
 
 
+def _owner_password() -> Tuple[str, bool]:
+    """
+    Return the password for the bootstrap owner and whether it was generated. The former
+    built-in default is never accepted, even when it is configured explicitly.
+    """
+    if DEFAULT_OWNER_PASSWORD and DEFAULT_OWNER_PASSWORD != _LEGACY_DEFAULT_OWNER_PASSWORD:
+        return DEFAULT_OWNER_PASSWORD, False
+    if DEFAULT_OWNER_PASSWORD:
+        logger.warning(
+            'DEFAULT_OWNER_PASSWORD is set to the former built-in default password and will be '
+            'ignored. A random password will be generated instead.'
+        )
+    return generate_password(), True
+
+
+def _announce_generated_owner_password(user: User, password: str) -> None:
+    login = user.email or user.username
+    print(
+        '\n'
+        '************************************************************\n'
+        f'Generated a password for the owner user {login}:\n'
+        f'\n    {password}\n\n'
+        'It is shown only once. Sign in and change it, or set\n'
+        'DEFAULT_OWNER_PASSWORD before the owner user is created.\n'
+        '************************************************************\n',
+        flush=True,
+    )
+
+
+def _rotate_legacy_default_owner_passwords(users: List[Optional[User]]) -> None:
+    """
+    Replace the password of any bootstrap owner that still has the former built-in default
+    and revoke the access tokens issued to it.
+    """
+    seen_ids = set()
+    for user in users:
+        if user is None or user.id in seen_ids or not user.password_hash:
+            continue
+        seen_ids.add(user.id)
+
+        try:
+            has_legacy_password = verify_password(
+                _LEGACY_DEFAULT_OWNER_PASSWORD,
+                user.password_hash,
+            )
+        except ValueError:
+            has_legacy_password = False
+        if not has_legacy_password:
+            continue
+
+        password, generated = _owner_password()
+        password_salt = generate_salt()
+        Oauth2AccessToken.query.filter(
+            Oauth2AccessToken.user_id == user.id,
+        ).delete(synchronize_session=False)
+        user.update(
+            password_hash=create_bcrypt_hash(password, password_salt),
+            password_salt=password_salt,
+        )
+        logger.warning(
+            f'User {user.email or user.username} had the former built-in default password. '
+            'Its password was replaced and its access tokens were revoked.'
+        )
+        if generated:
+            _announce_generated_owner_password(user, password)
+
+
 @safe_db_query
 def initialize_user_authentication(project_type: ProjectType) -> Oauth2Application:
     logger.info('User authentication is enabled.')
@@ -522,7 +601,6 @@ def initialize_user_authentication(project_type: ProjectType) -> Oauth2Applicati
                     username=get_settings_value(LDAP_ADMIN_USERNAME, 'admin'),
                 )
         else:
-            password_salt = generate_salt()
             user = User.query.filter(
                 or_(
                     User.email == DEFAULT_OWNER_EMAIL,
@@ -530,18 +608,33 @@ def initialize_user_authentication(project_type: ProjectType) -> Oauth2Applicati
                 ),
             ).first()
             if not user:
+                password, generated = _owner_password()
+                password_salt = generate_salt()
                 user = User.create(
                     email=DEFAULT_OWNER_EMAIL,
-                    password_hash=create_bcrypt_hash(DEFAULT_OWNER_PASSWORD, password_salt),
+                    password_hash=create_bcrypt_hash(password, password_salt),
                     password_salt=password_salt,
                     roles_new=[default_owner_role],
                     username=DEFAULT_OWNER_USERNAME,
                 )
+                if generated:
+                    _announce_generated_owner_password(user, password)
         owner_user = user
     else:
         if legacy_owner_user and not legacy_owner_user.roles_new:
             User.batch_update_user_roles()
         owner_user = next(iter(owner_users), None) or legacy_owner_user
+
+    if AUTHENTICATION_MODE.lower() != 'ldap':
+        bootstrap_users = User.query.filter(
+            or_(
+                User.email == DEFAULT_OWNER_EMAIL,
+                User.username == DEFAULT_OWNER_USERNAME,
+            ),
+        ).all()
+        _rotate_legacy_default_owner_passwords(
+            [owner_user, legacy_owner_user] + bootstrap_users,
+        )
 
     oauth_client = Oauth2Application.query.filter(
         Oauth2Application.client_id == OAUTH2_APPLICATION_CLIENT_ID,
@@ -605,9 +698,11 @@ async def main(
     except OSError:
         logger.error(f'Socket error while trying to find an open port. Defaulting to port {port}')
 
+    # Tornado binds every interface when the address is empty, so default to loopback.
+    # Pass --host 0.0.0.0 (or set MAGE_LISTEN_ADDRESS) to accept connections from other machines.
     app.listen(
         port,
-        address=host if host != 'localhost' else None,
+        address=host or 'localhost',
     )
 
     host = host or 'localhost'
@@ -764,7 +859,7 @@ def start_server(
     cluster_type: ClusterType = None,
     project_uuid: str = None,
 ):
-    host = host if host else None
+    host = host if host else (MAGE_LISTEN_ADDRESS or None)
     port = port if port else DATA_PREP_SERVER_PORT
     project = project if project else None
 

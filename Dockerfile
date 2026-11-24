@@ -67,6 +67,7 @@ RUN if [ -z "$FEATURE_BRANCH" ] || [ "$FEATURE_BRANCH" = "null" ] ; then \
 COPY --chmod=0755 ./scripts/install_other_dependencies.py ./scripts/run_app.sh /app/
 
 ENV MAGE_DATA_DIR="/home/src/mage_data"
+ENV MAGE_LISTEN_ADDRESS="0.0.0.0"
 ENV PYTHONPATH="${PYTHONPATH}:/home/src"
 WORKDIR /home/src
 EXPOSE 6789

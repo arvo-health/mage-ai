@@ -109,8 +109,12 @@ except ValueError:
 OAUTH_DEFAULT_ACCESS = os.getenv('OAUTH_DEFAULT_ACCESS')
 
 DEFAULT_OWNER_EMAIL = os.getenv('DEFAULT_OWNER_EMAIL') or 'admin@admin.com'
-DEFAULT_OWNER_PASSWORD = os.getenv('DEFAULT_OWNER_PASSWORD') or 'admin'
+# There is no fallback: when unset, a random owner password is generated on first boot.
+DEFAULT_OWNER_PASSWORD = os.getenv('DEFAULT_OWNER_PASSWORD') or None
 DEFAULT_OWNER_USERNAME = os.getenv('DEFAULT_OWNER_USERNAME') or 'admin'
+# Publicly documented password that older versions gave the bootstrap owner. It is only used
+# to detect accounts that still have it so they can be rotated; never assign it to a user.
+_LEGACY_DEFAULT_OWNER_PASSWORD = 'admin'
 
 # ---------------------
 # General Server Settings
@@ -121,6 +125,8 @@ CONCURRENCY_CONFIG_PIPELINE_RUN_LIMIT = get_int_value(
 )
 DISABLE_AUTO_BROWSER_OPEN = get_bool_value(os.getenv('DISABLE_AUTO_BROWSER_OPEN', 'False'))
 DISABLE_AUTORELOAD = get_bool_value(os.getenv('DISABLE_AUTORELOAD', 'False'))
+# Address the web server listens on when no host is passed. Unset means loopback only.
+MAGE_LISTEN_ADDRESS = os.getenv('MAGE_LISTEN_ADDRESS')
 HIDE_API_TRIGGER_TOKEN = get_bool_value(os.getenv('HIDE_API_TRIGGER_TOKEN', 'False'))
 
 # The hostname in Kubernetes or AWS ECS
@@ -253,6 +259,7 @@ MAGE_SETTINGS_ENVIRONMENT_VARIABLES = [
     'DISABLE_NOTEBOOK_EDIT_ACCESS',
     'DISABLE_AUTO_BROWSER_OPEN',
     'DISABLE_AUTORELOAD',
+    'MAGE_LISTEN_ADDRESS',
     'REQUIRE_USER_AUTHENTICATION',
     'AUTHENTICATION_MODE',
     'OAUTH_DEFAULT_ACCESS',
